@@ -40,6 +40,24 @@ pub trait Module: Send + Sync + 'static {
     fn priority(&self) -> i32 {
         0
     }
+
+    /// Runtime dependency names — module names this module depends on.
+    ///
+    /// Returns the names of modules that must be started before this one.
+    /// Used by `ModuleRegistry::topological_sort()` to establish correct boot
+    /// order. Defaults to empty (no runtime dependencies declared).
+    ///
+    /// If your module uses compile-time `DependsOn`, you should mirror the
+    /// dependency names here so the runtime topological sort is aware of them:
+    ///
+    /// ```rust,ignore
+    /// fn dep_names(&self) -> Vec<&'static str> {
+    ///     vec!["DatabaseModule"]
+    /// }
+    /// ```
+    fn dep_names(&self) -> Vec<&'static str> {
+        vec![]
+    }
 }
 
 // ── ModuleLifecycle ───────────────────────────────────────────────────────────

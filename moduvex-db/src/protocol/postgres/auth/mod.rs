@@ -1,9 +1,10 @@
-//! PostgreSQL MD5 authentication.
+//! PostgreSQL authentication — MD5 and SCRAM-SHA-256.
 //!
-//! Auth flow:
-//!   1. Server sends `AuthenticationMD5Password` with 4-byte salt
-//!   2. Client computes `"md5" + md5(md5(password + user) + salt)`
-//!   3. Client sends `PasswordMessage` with that string
+//! - MD5: legacy, still common on older PG deployments
+//! - SCRAM-SHA-256: default in PostgreSQL 14+ (RFC 5802 / RFC 7677)
+
+mod sha256_impl;
+pub mod scram_sha256;
 
 use md5::{Digest, Md5};
 

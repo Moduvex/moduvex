@@ -211,6 +211,7 @@ mod tests {
         ModuleEntry {
             name,
             priority: 0,
+            deps: vec![],
             lifecycle: Box::new(RecordingModule {
                 name,
                 log,

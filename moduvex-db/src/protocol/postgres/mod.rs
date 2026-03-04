@@ -1,5 +1,7 @@
 //! PostgreSQL protocol entry — `PgConnection` wraps a `TcpStream` and provides
 //! connect/query/terminate over the simple query protocol.
+//!
+//! Supports both MD5 (legacy) and SCRAM-SHA-256 (PostgreSQL 14+ default) auth.
 
 pub mod auth;
 pub mod codec;
@@ -12,9 +14,15 @@ use moduvex_runtime::net::TcpStream;
 
 use crate::error::{DbError, Result};
 use crate::protocol::postgres::auth::md5_password;
+use crate::protocol::postgres::auth::scram_sha256::{
+    ScramClient,
+    AUTH_SASL, AUTH_SASL_CONTINUE, AUTH_SASL_FINAL,
+    decode_sasl_mechanisms, decode_sasl_continue, decode_sasl_final,
+    encode_sasl_initial_response, encode_sasl_response,
+};
 use crate::protocol::postgres::codec::{
     decode_backend, encode_password, encode_query, encode_startup, BackendMessage, ColumnDesc,
-    MSG_PASSWORD, MSG_QUERY, MSG_TERMINATE,
+    MSG_AUTH, MSG_PASSWORD, MSG_QUERY, MSG_TERMINATE,
 };
 use crate::protocol::postgres::wire::{
     read_backend_message, write_frontend_message, write_startup_message,
@@ -67,6 +75,8 @@ pub struct PgConnection {
 impl PgConnection {
     /// Connect and authenticate to a PostgreSQL server.
     ///
+    /// Supports MD5 (legacy) and SCRAM-SHA-256 (PostgreSQL 14+ default).
+    ///
     /// # Arguments
     /// * `addr`     — host:port as `&str` (e.g. `"127.0.0.1:5432"`)
     /// * `user`     — PostgreSQL username
@@ -87,6 +97,15 @@ impl PgConnection {
         let mut params = HashMap::new();
         loop {
             let (msg_type, payload) = read_backend_message(&mut stream).await?;
+
+            // Intercept SASL auth messages before decode_backend, which does not
+            // handle auth sub-types 10/11/12 (returns UnsupportedAuth for them).
+            if msg_type == MSG_AUTH && is_sasl_auth(&payload) {
+                perform_scram_auth(&mut stream, user, password, &payload).await?;
+                // After SCRAM completes we expect AuthOk followed by params + ReadyForQuery
+                continue;
+            }
+
             match decode_backend(msg_type, &payload)? {
                 BackendMessage::AuthOk => {
                     // Auth succeeded; wait for ReadyForQuery
@@ -102,16 +121,8 @@ impl PgConnection {
                 BackendMessage::ReadyForQuery { .. } => {
                     return Ok(PgConnection { stream, params });
                 }
-                BackendMessage::ErrorResponse {
-                    code,
-                    message,
-                    detail,
-                } => {
-                    return Err(DbError::ServerError {
-                        code,
-                        message,
-                        detail,
-                    });
+                BackendMessage::ErrorResponse { code, message, detail } => {
+                    return Err(DbError::ServerError { code, message, detail });
                 }
                 BackendMessage::NoticeResponse => {}
                 other => {
@@ -158,17 +169,9 @@ impl PgConnection {
                     }
                     break;
                 }
-                BackendMessage::ErrorResponse {
-                    code,
-                    message,
-                    detail,
-                } => {
+                BackendMessage::ErrorResponse { code, message, detail } => {
                     self.drain_until_ready().await?;
-                    return Err(DbError::ServerError {
-                        code,
-                        message,
-                        detail,
-                    });
+                    return Err(DbError::ServerError { code, message, detail });
                 }
                 BackendMessage::ParameterStatus { .. } | BackendMessage::NoticeResponse => {}
                 BackendMessage::AuthOk | BackendMessage::AuthMd5 { .. } => {
@@ -195,17 +198,9 @@ impl PgConnection {
                     affected = parse_affected_rows(&tag);
                 }
                 BackendMessage::ReadyForQuery { .. } => break,
-                BackendMessage::ErrorResponse {
-                    code,
-                    message,
-                    detail,
-                } => {
+                BackendMessage::ErrorResponse { code, message, detail } => {
                     self.drain_until_ready().await?;
-                    return Err(DbError::ServerError {
-                        code,
-                        message,
-                        detail,
-                    });
+                    return Err(DbError::ServerError { code, message, detail });
                 }
                 BackendMessage::RowDescription(_) | BackendMessage::DataRow(_) => {}
                 BackendMessage::ParameterStatus { .. } | BackendMessage::NoticeResponse => {}
@@ -246,6 +241,108 @@ impl PgConnection {
     }
 }
 
+// ── SCRAM-SHA-256 handshake ───────────────────────────────────────────────────
+
+/// Returns true if the auth payload sub-type is 10 (SASL), 11 (SASLContinue), or 12 (SASLFinal).
+fn is_sasl_auth(payload: &[u8]) -> bool {
+    if payload.len() < 4 {
+        return false;
+    }
+    let sub = i32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    matches!(sub, AUTH_SASL | AUTH_SASL_CONTINUE | AUTH_SASL_FINAL)
+}
+
+/// Perform the full SCRAM-SHA-256 exchange starting from the AuthenticationSASL message.
+///
+/// On entry, `initial_payload` is the raw payload of the first auth message (sub-type 10).
+/// After this function returns `Ok(())`, the caller should continue the main loop to
+/// receive `AuthOk`, `ParameterStatus`, and `ReadyForQuery`.
+async fn perform_scram_auth(
+    stream: &mut TcpStream,
+    user: &str,
+    password: &str,
+    initial_payload: &[u8],
+) -> Result<()> {
+    // Step 1: decode mechanism list from AuthenticationSASL (sub=10)
+    let mechanisms = decode_sasl_mechanisms(initial_payload)?;
+
+    // Prefer SCRAM-SHA-256 (RFC 7677); reject if not offered
+    let mechanism = mechanisms
+        .iter()
+        .find(|m| m.as_str() == "SCRAM-SHA-256")
+        .ok_or_else(|| {
+            DbError::UnsupportedAuth(format!(
+                "server offered SASL mechanisms: {mechanisms:?}; SCRAM-SHA-256 not among them"
+            ))
+        })?;
+
+    // Step 2: send SASLInitialResponse with client-first-message
+    let scram = ScramClient::new(user, password);
+    let client_first = scram.client_first_message();
+    let sasl_init = encode_sasl_initial_response(mechanism, &client_first);
+    write_frontend_message(stream, MSG_PASSWORD, &sasl_init).await?;
+
+    // Step 3: receive AuthenticationSASLContinue (sub=11)
+    let (msg_type, payload) = read_backend_message(stream).await?;
+    if msg_type != MSG_AUTH {
+        return Err(DbError::Protocol(format!(
+            "expected auth message after SASLInitialResponse, got 0x{msg_type:02X}"
+        )));
+    }
+    let sub = if payload.len() >= 4 {
+        i32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
+    } else {
+        return Err(DbError::Protocol("auth payload too short for sub-type".into()));
+    };
+    if sub != AUTH_SASL_CONTINUE {
+        return Err(DbError::Protocol(format!(
+            "expected AuthSASLContinue (sub=11), got sub={sub}"
+        )));
+    }
+    let server_first = decode_sasl_continue(&payload)?;
+
+    // Step 4: compute client-final-message and expected server signature
+    let (client_final, expected_server_sig) = scram.process_server_first(&server_first)?;
+
+    // Step 5: send SASLResponse with client-final-message
+    let sasl_resp = encode_sasl_response(&client_final);
+    write_frontend_message(stream, MSG_PASSWORD, &sasl_resp).await?;
+
+    // Step 6: receive AuthenticationSASLFinal (sub=12) — server signature for mutual auth
+    let (msg_type, payload) = read_backend_message(stream).await?;
+    if msg_type != MSG_AUTH {
+        return Err(DbError::Protocol(format!(
+            "expected auth message after SASLResponse, got 0x{msg_type:02X}"
+        )));
+    }
+    let sub = if payload.len() >= 4 {
+        i32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
+    } else {
+        return Err(DbError::Protocol("auth payload too short for sub-type".into()));
+    };
+    if sub != AUTH_SASL_FINAL {
+        return Err(DbError::Protocol(format!(
+            "expected AuthSASLFinal (sub=12), got sub={sub}"
+        )));
+    }
+    let server_final = decode_sasl_final(&payload)?;
+
+    // Verify server signature (mutual authentication)
+    scram.verify_server_final(&server_final, &expected_server_sig)?;
+
+    // Step 7: receive AuthenticationOk (sub=0)
+    let (msg_type, payload) = read_backend_message(stream).await?;
+    match decode_backend(msg_type, &payload)? {
+        BackendMessage::AuthOk => Ok(()),
+        BackendMessage::ErrorResponse { code, message, detail } => {
+            Err(DbError::ServerError { code, message, detail })
+        }
+        other => Err(DbError::Protocol(format!(
+            "expected AuthOk after SCRAM, got: {other:?}"
+        ))),
+    }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Parse the rows-affected count from a `CommandComplete` tag.
@@ -280,5 +377,26 @@ mod tests {
     #[test]
     fn parse_affected_unknown_tag() {
         assert_eq!(parse_affected_rows("CREATE TABLE"), 0);
+    }
+
+    #[test]
+    fn is_sasl_auth_detects_sub_types() {
+        // sub=10 (SASL)
+        let p: Vec<u8> = 10i32.to_be_bytes().to_vec();
+        assert!(is_sasl_auth(&p));
+        // sub=11 (SASLContinue)
+        let p: Vec<u8> = 11i32.to_be_bytes().to_vec();
+        assert!(is_sasl_auth(&p));
+        // sub=12 (SASLFinal)
+        let p: Vec<u8> = 12i32.to_be_bytes().to_vec();
+        assert!(is_sasl_auth(&p));
+        // sub=0 (AuthOk) — not SASL
+        let p: Vec<u8> = 0i32.to_be_bytes().to_vec();
+        assert!(!is_sasl_auth(&p));
+        // sub=5 (MD5) — not SASL
+        let p: Vec<u8> = 5i32.to_be_bytes().to_vec();
+        assert!(!is_sasl_auth(&p));
+        // too short
+        assert!(!is_sasl_auth(&[0u8; 3]));
     }
 }

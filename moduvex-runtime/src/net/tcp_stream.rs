@@ -504,7 +504,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires IoSource ReadableFuture to resolve Ready — net integration pending"]
     fn tcp_connect_and_echo() {
         block_on_with_spawn(async {
             // Bind a listener on a random port.

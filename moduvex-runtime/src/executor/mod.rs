@@ -29,6 +29,9 @@ use crate::platform::sys::{create_pipe, events_with_capacity, Interest};
 use crate::reactor::{with_reactor, with_reactor_mut};
 use crate::time::{next_timer_deadline, tick_timer_wheel};
 
+#[cfg(unix)]
+use crate::signal::{on_signal_readable, SIGNAL_TOKEN};
+
 use scheduler::{GlobalQueue, LocalQueue};
 use task::{JoinHandle, Task, STATE_CANCELLED, STATE_COMPLETED};
 use waker::make_waker;
@@ -185,6 +188,15 @@ impl Executor {
         // poll() also fires I/O wakers stored in the waker registry.
         let _ = with_reactor_mut(|r| r.poll(&mut events, Some(timeout_ms)));
         self.drain_wake_pipe();
+
+        // Check if the signal pipe became readable and dispatch signal waiters.
+        #[cfg(unix)]
+        {
+            let signal_fired = events.iter().any(|ev| ev.token == SIGNAL_TOKEN && ev.readable);
+            if signal_fired {
+                on_signal_readable();
+            }
+        }
     }
 
     /// Read all pending bytes from the self-pipe's read end (non-blocking).
