@@ -117,10 +117,17 @@ CREATE TABLE IF NOT EXISTS _moduvex_migrations (
 pub const SELECT_APPLIED_SQL: &str = "SELECT version FROM _moduvex_migrations ORDER BY version ASC";
 
 /// Build the SQL to record a migration as applied.
+///
+/// The filename is sanitized: null bytes stripped, single quotes escaped.
+/// The version is a u64 (safe from injection).
 pub fn insert_applied_sql(version: u64, filename: &str) -> String {
+    // Strip null bytes and escape single quotes for SQL string literals.
+    let safe_name = filename
+        .replace('\0', "")
+        .replace('\\', "\\\\")
+        .replace('\'', "''");
     format!(
-        "INSERT INTO _moduvex_migrations (version, filename) VALUES ({version}, '{}')",
-        filename.replace('\'', "''")
+        "INSERT INTO _moduvex_migrations (version, filename) VALUES ({version}, E'{safe_name}')"
     )
 }
 

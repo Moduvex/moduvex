@@ -116,7 +116,11 @@ impl Drop for IoSource {
         if self.registered.swap(false, Ordering::AcqRel) {
             // Remove wakers first, then deregister from the platform backend.
             // Ignore errors — the fd may already be closed by the caller.
-            let _ = with_reactor_mut(|r| r.deregister_with_token(self.raw, self.token));
+            // Use catch_unwind to avoid panicking if the reactor RefCell is
+            // already borrowed (e.g., IoSource dropped inside a reactor callback).
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = with_reactor_mut(|r| r.deregister_with_token(self.raw, self.token));
+            }));
         }
     }
 }
@@ -137,18 +141,21 @@ impl<'a> Future for ReadableFuture<'a> {
     type Output = io::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // If already armed, this is a re-poll after the reactor woke us — ready.
+        if self.armed {
+            return Poll::Ready(Ok(()));
+        }
+
         // Store the waker so the reactor can wake us when the fd is readable.
         with_reactor_mut(|r| {
             r.wakers
                 .set_read_waker(self.source.token, cx.waker().clone());
         });
 
-        // Arm READABLE interest on first poll only (avoid redundant syscalls).
-        if !self.armed {
-            self.armed = true;
-            if let Err(e) = self.source.reregister(Interest::READABLE) {
-                return Poll::Ready(Err(e));
-            }
+        // Arm READABLE interest on first poll and return Pending.
+        self.armed = true;
+        if let Err(e) = self.source.reregister(Interest::READABLE) {
+            return Poll::Ready(Err(e));
         }
 
         Poll::Pending
@@ -169,17 +176,21 @@ impl<'a> Future for WritableFuture<'a> {
     type Output = io::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // If already armed, this is a re-poll after the reactor woke us — ready.
+        if self.armed {
+            return Poll::Ready(Ok(()));
+        }
+
         // Store the waker so the reactor can wake us when the fd is writable.
         with_reactor_mut(|r| {
             r.wakers
                 .set_write_waker(self.source.token, cx.waker().clone());
         });
 
-        if !self.armed {
-            self.armed = true;
-            if let Err(e) = self.source.reregister(Interest::WRITABLE) {
-                return Poll::Ready(Err(e));
-            }
+        // Arm WRITABLE interest on first poll and return Pending.
+        self.armed = true;
+        if let Err(e) = self.source.reregister(Interest::WRITABLE) {
+            return Poll::Ready(Err(e));
         }
 
         Poll::Pending

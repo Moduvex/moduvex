@@ -167,15 +167,14 @@ pub fn parse_request_head<'buf>(buf: &'buf [u8], limits: &ParseLimits) -> ParseS
             return ParseStatus::Error(ParseError::HeaderInjection);
         }
 
-        let name_lower = name.to_ascii_lowercase();
-
+        // Case-insensitive checks without allocating a lowercase copy.
         // Track Host presence.
-        if name_lower == "host" {
+        if name.eq_ignore_ascii_case("host") {
             has_host = true;
         }
 
         // Detect Transfer-Encoding.
-        if name_lower == "transfer-encoding" {
+        if name.eq_ignore_ascii_case("transfer-encoding") {
             has_te = true;
             if value.windows(7).any(|w| w.eq_ignore_ascii_case(b"chunked")) {
                 has_chunked_te = true;
@@ -183,7 +182,7 @@ pub fn parse_request_head<'buf>(buf: &'buf [u8], limits: &ParseLimits) -> ParseS
         }
 
         // Detect Content-Length conflicts.
-        if name_lower == "content-length" {
+        if name.eq_ignore_ascii_case("content-length") {
             let s = std::str::from_utf8(value).unwrap_or("").trim();
             match s.parse::<u64>() {
                 Ok(n) => {

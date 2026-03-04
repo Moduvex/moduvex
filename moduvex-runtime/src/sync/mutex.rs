@@ -85,8 +85,11 @@ impl<T> Future for LockFuture<'_, T> {
         let mut g = self.inner.lock().unwrap();
         if !g.locked {
             g.locked = true;
+            // Cache the pointer to the protected value at lock acquisition time.
+            let value_ptr = g.value.get();
             Poll::Ready(MutexGuard {
                 inner: Arc::clone(self.inner),
+                value_ptr,
             })
         } else {
             g.waiters.push_back(cx.waker().clone());
@@ -100,16 +103,27 @@ impl<T> Future for LockFuture<'_, T> {
 /// RAII guard that releases the async lock on drop and wakes the next waiter.
 pub struct MutexGuard<T> {
     inner: Arc<StdMutex<Inner<T>>>,
+    /// Cached raw pointer to the protected value. Avoids acquiring the
+    /// StdMutex on every deref. Valid for the lifetime of this guard because:
+    /// - The Arc keeps the Inner allocation alive.
+    /// - The async `locked` flag prevents concurrent mutation.
+    value_ptr: *mut T,
 }
+
+// SAFETY: MutexGuard<T> is Send+Sync when T: Send because:
+// - The async lock serialises all access to the value.
+// - The raw pointer comes from UnsafeCell inside an Arc (heap-stable).
+unsafe impl<T: Send> Send for MutexGuard<T> {}
+unsafe impl<T: Send> Sync for MutexGuard<T> {}
 
 impl<T> Deref for MutexGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
         // SAFETY: we hold the async lock (`locked == true`), so no other
-        // `MutexGuard` exists concurrently. The reference lifetime is bounded
-        // by `&self` which keeps the guard (and thus the lock) alive.
-        unsafe { &*self.inner.lock().unwrap().value.get() }
+        // `MutexGuard` exists concurrently. The Arc keeps memory alive.
+        // `value_ptr` was obtained at lock acquisition time.
+        unsafe { &*self.value_ptr }
     }
 }
 
@@ -117,7 +131,7 @@ impl<T> DerefMut for MutexGuard<T> {
     fn deref_mut(&mut self) -> &mut T {
         // SAFETY: we hold the async lock exclusively; `&mut self` ensures
         // no aliased mutable references exist via this guard.
-        unsafe { &mut *self.inner.lock().unwrap().value.get() }
+        unsafe { &mut *self.value_ptr }
     }
 }
 

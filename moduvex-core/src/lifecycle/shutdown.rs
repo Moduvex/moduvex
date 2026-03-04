@@ -78,66 +78,58 @@ pub async fn wait_for_shutdown(handle: &ShutdownHandle) {
     #[cfg(unix)]
     {
         use moduvex_runtime::signal::{signal, SignalKind};
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::task::Poll as TaskPoll;
 
         // Set up SIGINT + SIGTERM listeners.
-        let sigint = signal(SignalKind::Interrupt).ok();
-        let sigterm = signal(SignalKind::Terminate).ok();
+        let mut sigint = signal(SignalKind::Interrupt).ok();
+        let mut sigterm = signal(SignalKind::Terminate).ok();
 
-        // Poll both signals and the programmatic handle concurrently.
-        // We use a simple spin-yield loop here rather than a full select!
-        // macro (which would require either futures-util or a custom impl).
-        // This is acceptable because `Ready` phase is a steady-state wait —
-        // latency here does not affect request throughput.
-        loop {
+        // Poll signal futures and the programmatic handle concurrently.
+        // Each iteration: check handle, poll signals, then yield if none ready.
+        std::future::poll_fn(|cx| {
             if handle.is_requested() {
-                return;
+                return TaskPoll::Ready(());
             }
 
-            // Check if a signal future is ready by polling via our own waker.
-            // Simplest correct approach: yield to the executor each iteration.
-            // The signal futures park the task via their internal wakers,
-            // so this loop only burns CPU when actually woken up.
-            if let Some(ref _s) = sigint { /* signal will wake the task */ }
-            if let Some(ref _s) = sigterm { /* signal will wake the task */ }
+            // Poll signal futures — they register their wakers internally.
+            if let Some(ref mut s) = sigint {
+                if Pin::new(s).poll(cx).is_ready() {
+                    return TaskPoll::Ready(());
+                }
+            }
+            if let Some(ref mut s) = sigterm {
+                if Pin::new(s).poll(cx).is_ready() {
+                    return TaskPoll::Ready(());
+                }
+            }
 
-            // Yield to the executor so it can poll signal futures.
-            yield_now().await;
-        }
+            // Not ready yet — wakers are registered by signal futures above.
+            // Also re-check the programmatic handle on next wake.
+            TaskPoll::Pending
+        })
+        .await;
     }
 
     #[cfg(not(unix))]
     {
         // Non-Unix: only programmatic shutdown is supported.
-        loop {
+        // Use poll_fn to avoid spin-loop — waker must be stored externally
+        // by the ShutdownHandle to wake this future when requested.
+        std::future::poll_fn(|cx: &mut std::task::Context<'_>| {
             if handle.is_requested() {
-                return;
-            }
-            yield_now().await;
-        }
-    }
-}
-
-/// Minimal single-poll yield that wakes the task on the next executor turn.
-async fn yield_now() {
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-
-    struct YieldNow(bool);
-    impl Future for YieldNow {
-        type Output = ();
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-            if self.0 {
-                Poll::Ready(())
+                std::task::Poll::Ready(())
             } else {
-                self.0 = true;
+                // Schedule a re-check: wake ourselves on next executor tick.
                 cx.waker().wake_by_ref();
-                Poll::Pending
+                std::task::Poll::Pending
             }
-        }
+        })
+        .await;
     }
-    YieldNow(false).await
 }
+
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

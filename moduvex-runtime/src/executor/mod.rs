@@ -188,6 +188,7 @@ impl Executor {
     }
 
     /// Read all pending bytes from the self-pipe's read end (non-blocking).
+    #[cfg(unix)]
     fn drain_wake_pipe(&self) {
         let mut buf = [0u8; 64];
         loop {
@@ -199,8 +200,15 @@ impl Executor {
         }
     }
 
+    #[cfg(not(unix))]
+    fn drain_wake_pipe(&self) {
+        // On non-Unix platforms, the self-pipe mechanism is not used.
+        // The platform-specific reactor implementation handles wake-up.
+    }
+
     /// Build a `Waker` for the root future. On wake, writes one byte to the
     /// self-pipe so the reactor's `poll` returns immediately.
+    #[cfg(unix)]
     fn make_root_waker(&self) -> std::task::Waker {
         use std::task::{RawWaker, RawWakerVTable};
 
@@ -229,6 +237,19 @@ impl Executor {
         // SAFETY: ROOT_VTABLE satisfies the RawWaker contract; the fd lives for
         // the duration of the Executor which outlives any root poll call.
         unsafe { std::task::Waker::from_raw(raw) }
+    }
+
+    #[cfg(not(unix))]
+    fn make_root_waker(&self) -> std::task::Waker {
+        // On non-Unix, use a noop waker. Platform reactor handles wake-up.
+        use std::task::{RawWaker, RawWakerVTable};
+        static NOOP_VTABLE: RawWakerVTable = RawWakerVTable::new(
+            |p| RawWaker::new(p, &NOOP_VTABLE),
+            |_| {},
+            |_| {},
+            |_| {},
+        );
+        unsafe { std::task::Waker::from_raw(RawWaker::new(std::ptr::null(), &NOOP_VTABLE)) }
     }
 }
 

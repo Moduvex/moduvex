@@ -31,6 +31,21 @@ impl Order {
     }
 }
 
+// ── Identifier validation ─────────────────────────────────────────────────────
+
+/// Validate a SQL identifier (table name, column name) to prevent injection.
+/// Allows alphanumeric, underscore, dot (schema.table), and rejects everything else.
+fn validate_identifier(ident: &str) -> std::result::Result<(), String> {
+    if ident.is_empty() {
+        return Err("SQL identifier cannot be empty".to_string());
+    }
+    if ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.') {
+        Ok(())
+    } else {
+        Err(format!("invalid SQL identifier: {ident:?}"))
+    }
+}
+
 // ── QueryBuilder ──────────────────────────────────────────────────────────────
 
 /// Fluent builder for SELECT queries (MVP scope).
@@ -49,27 +64,46 @@ pub struct QueryBuilder {
 
 impl QueryBuilder {
     /// Start a SELECT query against `table`.
+    ///
+    /// # Panics
+    /// Panics if `table` contains invalid identifier characters.
     pub fn select(table: impl Into<String>) -> Self {
+        let table = table.into();
+        validate_identifier(&table).expect("invalid table name");
         Self {
-            table: table.into(),
+            table,
             ..Default::default()
         }
     }
 
     /// Set the columns to SELECT. Defaults to `*` if not called.
+    ///
+    /// # Panics
+    /// Panics if any column name contains invalid identifier characters.
     pub fn columns(mut self, cols: &[&str]) -> Self {
+        for col in cols {
+            validate_identifier(col).expect("invalid column name");
+        }
         self.columns = cols.iter().map(|s| s.to_string()).collect();
         self
     }
 
     /// Add an `AND col = $n` equality condition.
+    ///
+    /// # Panics
+    /// Panics if `col` contains invalid identifier characters.
     pub fn where_eq(mut self, col: &str, val: impl ToParam) -> Self {
+        validate_identifier(col).expect("invalid column name in where_eq");
         self.conditions.push((col.to_string(), val.to_param()));
         self
     }
 
     /// Add an ORDER BY clause.
+    ///
+    /// # Panics
+    /// Panics if `col` contains invalid identifier characters.
     pub fn order_by(mut self, col: &str, order: Order) -> Self {
+        validate_identifier(col).expect("invalid column name in order_by");
         self.order = Some((col.to_string(), order));
         self
     }

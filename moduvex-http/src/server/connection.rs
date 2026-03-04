@@ -270,10 +270,17 @@ impl Connection {
     }
 
     async fn read_chunked_body(&mut self, buf: &mut Vec<u8>) -> Result<Body, ()> {
+        let max_body = self.config.max_body_size as usize;
         loop {
             if has_chunked_terminator(buf) {
                 match crate::protocol::h1::decode_chunked(buf) {
                     Ok(decoded) => {
+                        // Enforce max_body_size on the decoded body.
+                        if decoded.len() > max_body {
+                            self.send_error(StatusCode::CONTENT_TOO_LARGE, "body too large")
+                                .await;
+                            return Err(());
+                        }
                         buf.clear();
                         return Ok(Body::Fixed(decoded));
                     }
@@ -284,7 +291,9 @@ impl Connection {
                     }
                 }
             }
-            if buf.len() > self.config.max_body_size as usize + 1024 {
+            // Limit raw buffer to prevent memory exhaustion during chunked reads.
+            // Allow overhead for chunk metadata (sizes, CRLFs).
+            if buf.len() > max_body + max_body / 10 + 1024 {
                 self.send_error(StatusCode::CONTENT_TOO_LARGE, "body too large")
                     .await;
                 return Err(());
@@ -312,6 +321,12 @@ impl Connection {
         let mut sent = 0;
         while sent < buf.len() {
             let n = poll_fn(|cx| Pin::new(&mut self.stream).poll_write(cx, &buf[sent..])).await?;
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "write returned 0 bytes",
+                ));
+            }
             sent += n;
         }
         Ok(())
@@ -355,6 +370,10 @@ fn parse_error_to_status(e: &ParseError) -> StatusCode {
     }
 }
 
+/// Check if the buffer contains a complete chunked body by attempting to decode.
+/// This avoids scanning for `0\r\n\r\n` at arbitrary offsets (request smuggling).
 fn has_chunked_terminator(buf: &[u8]) -> bool {
-    buf.windows(5).any(|w| w == b"0\r\n\r\n")
+    // Only consider it complete if the actual chunked decoder succeeds.
+    // Incomplete returns false; malformed also returns false (handled later).
+    crate::protocol::h1::decode_chunked(buf).is_ok()
 }
