@@ -1,0 +1,44 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# OS files
+.DS_Store
+*.pem
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env*
+!.env.example
+
+# Claude Code / AI tooling (local only)
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# Other AI/dev tools (local only)
+.opencode/
+.gemini/
+.serena/
+.repomixignore
+repomix-output.xml
+
+# Plans and reports (local dev artifacts)
+plans/
+docs/screenshots/
+screenshots/
+
+# Misc local files
+release-manifest.json
+logs.txt
+prompt.md
+ck.md
+test-ck
+__pycache__
+external/
+worktrees/

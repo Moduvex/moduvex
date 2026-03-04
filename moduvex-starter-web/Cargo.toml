@@ -1,0 +1,18 @@
+[package]
+name = "moduvex-starter-web"
+description = "Web starter for Moduvex — bundles runtime, HTTP, core, config, and observability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+moduvex-runtime = { path = "../moduvex-runtime" }
+moduvex-http = { path = "../moduvex-http" }
+moduvex-core = { path = "../moduvex-core" }
+moduvex-config = { path = "../moduvex-config" }
+moduvex-observe = { path = "../moduvex-observe" }
+
+[features]
+default = []

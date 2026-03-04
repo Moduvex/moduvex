@@ -1,0 +1,14 @@
+[package]
+name = "moduvex-core"
+description = "Core framework crate for Moduvex — type-state DI, module system, lifecycle engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+moduvex-runtime = { path = "../moduvex-runtime" }
+moduvex-macros = { path = "../moduvex-macros" }
+
+[dev-dependencies]

@@ -1,0 +1,15 @@
+[package]
+name = "moduvex-db"
+description = "Database abstraction layer for Moduvex — PostgreSQL wire protocol, connection pool, migrations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+moduvex-runtime = { path = "../moduvex-runtime" }
+moduvex-core    = { path = "../moduvex-core" }
+md-5             = "0.10"
+
+[dev-dependencies]

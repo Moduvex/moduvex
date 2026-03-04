@@ -1,0 +1,19 @@
+[package]
+name = "moduvex-starter-data"
+description = "Data starter for Moduvex — bundles runtime, database, core, and config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+moduvex-runtime = { path = "../moduvex-runtime" }
+moduvex-db = { path = "../moduvex-db" }
+moduvex-core = { path = "../moduvex-core" }
+moduvex-config = { path = "../moduvex-config" }
+moduvex-observe = { path = "../moduvex-observe", optional = true }
+
+[features]
+default = []
+observe = ["moduvex-observe"]
