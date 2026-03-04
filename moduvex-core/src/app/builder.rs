@@ -98,6 +98,7 @@ impl<Modules> Moduvex<Configured, Modules> {
         let entry = ModuleEntry {
             name: instance.name(),
             priority: instance.priority(),
+            deps: instance.dep_names(),
             lifecycle: Box::new(instance),
         };
         self.module_entries.push(entry);
@@ -220,6 +221,7 @@ mod tests {
                 registry.push(ModuleEntry {
                     name: "noop",
                     priority: 0,
+                    deps: vec![],
                     lifecycle: Box::new(NoopModule),
                 });
                 let ctx = Arc::new(AppContext::new());

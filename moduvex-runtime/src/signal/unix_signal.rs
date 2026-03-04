@@ -103,7 +103,7 @@ fn init_signal_state() -> io::Result<SignalState> {
     })
 }
 
-/// Install a `sigaction` handler for `signum` that writes one byte to `write_fd`.
+/// Install a `sigaction` handler for `signum` that writes the signal number to `write_fd`.
 fn install_handler(signum: libc::c_int, write_fd: i32) -> io::Result<()> {
     // Store write_fd globally so the handler (a bare fn pointer) can reach it.
     // We use a static per-signal to keep this simple.
@@ -129,14 +129,19 @@ static SIGNAL_WRITE_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::Atomic
 
 /// The actual signal handler. Must be async-signal-safe.
 ///
+/// Writes the signal number as a single byte to the pipe so `on_signal_readable`
+/// can distinguish SIGINT (2) from SIGTERM (15).
+///
 /// SAFETY: This function is invoked by the kernel on signal delivery. It only
 /// calls `write(2)`, which is listed as async-signal-safe by POSIX.
-extern "C" fn signal_handler(_signum: libc::c_int) {
+extern "C" fn signal_handler(signum: libc::c_int) {
     let fd = SIGNAL_WRITE_FD.load(std::sync::atomic::Ordering::Relaxed);
     if fd == -1 {
         return;
     }
-    let b: u8 = 1;
+    // Encode the signal number as the byte so the reader can distinguish signals.
+    // Signal numbers fit in a u8 on all supported platforms (max is ~64).
+    let b: u8 = signum as u8;
     // SAFETY: `fd` is the write end of our non-blocking pipe; writing one byte
     // is async-signal-safe. We intentionally ignore the return value because
     // there is nothing safe we can do on failure inside a signal handler.
@@ -147,7 +152,8 @@ extern "C" fn signal_handler(_signum: libc::c_int) {
 
 /// Called by the executor's event loop when the reactor fires `SIGNAL_TOKEN`.
 ///
-/// Drains the self-pipe and wakes all registered signal waiters.
+/// Drains the self-pipe; each byte encodes the signal number (signum as u8).
+/// Only pushes and wakes waiters for the specific `SignalKind` that was received.
 #[allow(dead_code)] // called by executor run loop when signal integration is active
 pub(crate) fn on_signal_readable() {
     let state_lock = match SIGNAL_STATE.get() {
@@ -157,8 +163,9 @@ pub(crate) fn on_signal_readable() {
 
     let mut state = state_lock.lock().unwrap();
 
-    // Drain the pipe — each byte corresponds to one or more signal deliveries.
+    // Drain the pipe — each byte encodes one signal delivery as its signal number.
     let mut buf = [0u8; 64];
+    let mut received: Vec<SignalKind> = Vec::new();
     loop {
         // SAFETY: `read_fd` is a valid O_NONBLOCK fd; `buf` is a valid buffer.
         let n = unsafe {
@@ -169,15 +176,40 @@ pub(crate) fn on_signal_readable() {
             )
         };
         if n <= 0 {
-            break;
-        } // EAGAIN or EOF
+            break; // EAGAIN or EOF
+        }
+        // Decode each byte as a signal number to determine its kind.
+        for &sigbyte in &buf[..n as usize] {
+            let kind = match sigbyte as libc::c_int {
+                libc::SIGINT => Some(SignalKind::Interrupt),
+                libc::SIGTERM => Some(SignalKind::Terminate),
+                _ => None, // unknown signal — ignore
+            };
+            if let Some(k) = kind {
+                received.push(k);
+            }
+        }
     }
 
-    // We can't distinguish SIGINT from SIGTERM from a single byte; wake all waiters.
-    // Production-quality code would encode the signal number in the byte.
-    let wakers: Vec<Waker> = state.waiters.drain(..).map(|(_, w)| w).collect();
-    state.pending.push(SignalKind::Interrupt); // conservative: wake for Interrupt
-    state.pending.push(SignalKind::Terminate);
+    // Push received signal kinds into the pending list.
+    for kind in received {
+        state.pending.push(kind);
+    }
+
+    // Snapshot pending kinds to avoid simultaneous mutable + immutable borrow.
+    let pending_snapshot = state.pending.clone();
+
+    // Drain waiters whose kind now has a pending entry; collect their wakers.
+    let mut wakers: Vec<Waker> = Vec::new();
+    state.waiters.retain(|(kind, waker)| {
+        if pending_snapshot.contains(kind) {
+            wakers.push(waker.clone());
+            false // remove from waiters — will be woken below
+        } else {
+            true // keep waiting
+        }
+    });
+
     drop(state);
 
     for w in wakers {
