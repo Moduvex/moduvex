@@ -16,11 +16,11 @@
 
 // ── Re-exports ──
 
-pub use moduvex_runtime;
-pub use moduvex_http;
-pub use moduvex_core;
 pub use moduvex_config;
+pub use moduvex_core;
+pub use moduvex_http;
 pub use moduvex_observe;
+pub use moduvex_runtime;
 
 // ── Default config ──
 
@@ -62,15 +62,15 @@ pub mod prelude {
 
     // HTTP types + extractors
     pub use moduvex_http::{
-        HttpServer, Request, Response, Router, StatusCode,
-        FromRequest, IntoHandler, Json, Path, Query, State, Middleware,
+        FromRequest, HttpServer, IntoHandler, Json, Middleware, Path, Query, Request, Response,
+        Router, State, StatusCode,
     };
 
     // Config
     pub use moduvex_config::{ConfigLoader, Profile};
 
     // Observability macros
-    pub use moduvex_observe::{info, warn, error, debug, trace_event};
+    pub use moduvex_observe::{debug, error, info, trace_event, warn};
     pub use moduvex_observe::{Counter, Gauge, Histogram, Span};
 
     // Starter helpers

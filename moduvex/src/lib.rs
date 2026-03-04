@@ -17,9 +17,9 @@
 
 // ── Always available ──
 
-pub use moduvex_runtime as runtime;
-pub use moduvex_core as core;
 pub use moduvex_config as config;
+pub use moduvex_core as core;
+pub use moduvex_runtime as runtime;
 
 // ── Feature-gated re-exports ──
 
@@ -42,15 +42,15 @@ pub use moduvex_starter_data as starter_data;
 
 pub mod prelude {
     // Core (always available)
-    pub use moduvex_core::prelude::*;
     pub use moduvex_config::{ConfigLoader, Profile};
+    pub use moduvex_core::prelude::*;
 
     // Web feature
     #[cfg(feature = "web")]
     pub use moduvex_http::{HttpServer, Request, Response, Router, StatusCode};
 
     #[cfg(feature = "web")]
-    pub use moduvex_observe::{info, warn, error, debug, trace_event};
+    pub use moduvex_observe::{debug, error, info, trace_event, warn};
 
     #[cfg(feature = "web")]
     pub use moduvex_observe::{Counter, Gauge, Histogram, Span};

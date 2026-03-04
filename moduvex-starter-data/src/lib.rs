@@ -15,10 +15,10 @@
 
 // ── Re-exports ──
 
-pub use moduvex_runtime;
-pub use moduvex_db;
-pub use moduvex_core;
 pub use moduvex_config;
+pub use moduvex_core;
+pub use moduvex_db;
+pub use moduvex_runtime;
 
 #[cfg(feature = "observe")]
 pub use moduvex_observe;
@@ -58,9 +58,7 @@ pub mod prelude {
     pub use moduvex_core::prelude::*;
 
     // Database types
-    pub use moduvex_db::{
-        ConnectionPool, PoolConfig, Row, RowSet, Transaction,
-    };
+    pub use moduvex_db::{ConnectionPool, PoolConfig, Row, RowSet, Transaction};
 
     // Config
     pub use moduvex_config::{ConfigLoader, Profile};
