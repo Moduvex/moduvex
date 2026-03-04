@@ -58,7 +58,12 @@ impl<T> Inner<T> {
 /// receiver has consumed an item.
 pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     let inner = Arc::new(Mutex::new(Inner::new(Some(capacity.max(1)))));
-    (Sender { inner: inner.clone() }, Receiver { inner })
+    (
+        Sender {
+            inner: inner.clone(),
+        },
+        Receiver { inner },
+    )
 }
 
 /// Sending half of a bounded MPSC channel.
@@ -71,7 +76,9 @@ pub struct Sender<T> {
 impl<T> Clone for Sender<T> {
     fn clone(&self) -> Self {
         self.inner.lock().unwrap().sender_count += 1;
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -94,7 +101,10 @@ impl<T> Sender<T> {
     ///
     /// Returns `Err(value)` if the receiver has been dropped.
     pub fn send(&self, value: T) -> SendFuture<'_, T> {
-        SendFuture { inner: &self.inner, value: Some(value) }
+        SendFuture {
+            inner: &self.inner,
+            value: Some(value),
+        }
     }
 }
 
@@ -142,7 +152,12 @@ impl<T> Future for SendFuture<'_, T> {
 /// Sends never block; the buffer grows as needed.
 pub fn unbounded<T>() -> (UnboundedSender<T>, Receiver<T>) {
     let inner = Arc::new(Mutex::new(Inner::new(None)));
-    (UnboundedSender { inner: inner.clone() }, Receiver { inner })
+    (
+        UnboundedSender {
+            inner: inner.clone(),
+        },
+        Receiver { inner },
+    )
 }
 
 /// Sending half of an unbounded MPSC channel.
@@ -153,7 +168,9 @@ pub struct UnboundedSender<T> {
 impl<T> Clone for UnboundedSender<T> {
     fn clone(&self) -> Self {
         self.inner.lock().unwrap().sender_count += 1;
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -265,8 +282,12 @@ mod tests {
         block_on_with_spawn(async {
             let (tx1, mut rx) = unbounded::<u32>();
             let tx2 = tx1.clone();
-            let jh1 = spawn(async move { tx1.send(10).unwrap(); });
-            let jh2 = spawn(async move { tx2.send(20).unwrap(); });
+            let jh1 = spawn(async move {
+                tx1.send(10).unwrap();
+            });
+            let jh2 = spawn(async move {
+                tx2.send(20).unwrap();
+            });
             jh1.await.unwrap();
             jh2.await.unwrap();
             let mut vals = vec![rx.recv().await.unwrap(), rx.recv().await.unwrap()];
@@ -282,7 +303,9 @@ mod tests {
             // Fill the channel
             tx.send(1).await.unwrap();
             // Spawn a producer that will block until we consume
-            let jh = spawn(async move { tx.send(2).await.unwrap(); });
+            let jh = spawn(async move {
+                tx.send(2).await.unwrap();
+            });
             assert_eq!(rx.recv().await, Some(1));
             jh.await.unwrap();
             assert_eq!(rx.recv().await, Some(2));

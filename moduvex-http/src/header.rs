@@ -24,7 +24,9 @@ pub struct HeaderMap {
 impl HeaderMap {
     /// Create an empty header map.
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// Insert a header, replacing any existing entry with the same name.
@@ -54,13 +56,17 @@ impl HeaderMap {
     /// Append a header, allowing multiple values with the same name.
     pub fn append(&mut self, name: impl Into<String>, value: impl Into<Vec<u8>>) {
         let name = name.into().to_ascii_lowercase();
-        self.entries.push(HeaderEntry { name, value: value.into() });
+        self.entries.push(HeaderEntry {
+            name,
+            value: value.into(),
+        });
     }
 
     /// Get the first value for `name` (case-insensitive).
     pub fn get(&self, name: &str) -> Option<&[u8]> {
         let lower = name.to_ascii_lowercase();
-        self.entries.iter()
+        self.entries
+            .iter()
             .find(|e| e.name == lower)
             .map(|e| e.value.as_slice())
     }
@@ -73,7 +79,8 @@ impl HeaderMap {
     /// Get all values for `name` (case-insensitive).
     pub fn get_all(&self, name: &str) -> impl Iterator<Item = &[u8]> {
         let lower = name.to_ascii_lowercase();
-        self.entries.iter()
+        self.entries
+            .iter()
             .filter(move |e| e.name == lower)
             .map(|e| e.value.as_slice())
     }
@@ -92,14 +99,20 @@ impl HeaderMap {
 
     /// Iterate over all entries in insertion order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &[u8])> {
-        self.entries.iter().map(|e| (e.name.as_str(), e.value.as_slice()))
+        self.entries
+            .iter()
+            .map(|e| (e.name.as_str(), e.value.as_slice()))
     }
 
     /// Number of entries (including duplicates).
-    pub fn len(&self) -> usize { self.entries.len() }
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
 
     /// True if no entries present.
-    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -110,8 +123,14 @@ mod tests {
     fn insert_and_get() {
         let mut map = HeaderMap::new();
         map.insert("Content-Type", b"application/json".to_vec());
-        assert_eq!(map.get("content-type"), Some(b"application/json".as_slice()));
-        assert_eq!(map.get("Content-Type"), Some(b"application/json".as_slice()));
+        assert_eq!(
+            map.get("content-type"),
+            Some(b"application/json".as_slice())
+        );
+        assert_eq!(
+            map.get("Content-Type"),
+            Some(b"application/json".as_slice())
+        );
     }
 
     #[test]

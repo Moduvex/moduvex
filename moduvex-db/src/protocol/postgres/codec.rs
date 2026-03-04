@@ -23,20 +23,20 @@ use crate::protocol::postgres::wire::{read_cstring, write_cstring};
 
 // ── Frontend message type bytes ───────────────────────────────────────────────
 
-pub const MSG_QUERY:    u8 = b'Q';
+pub const MSG_QUERY: u8 = b'Q';
 pub const MSG_PASSWORD: u8 = b'p';
-pub const MSG_TERMINATE:u8 = b'X';
+pub const MSG_TERMINATE: u8 = b'X';
 
 // ── Backend message type bytes ────────────────────────────────────────────────
 
-pub const MSG_AUTH:             u8 = b'R';
-pub const MSG_PARAM_STATUS:     u8 = b'S';
-pub const MSG_READY_FOR_QUERY:  u8 = b'Z';
-pub const MSG_ROW_DESC:         u8 = b'T';
-pub const MSG_DATA_ROW:         u8 = b'D';
+pub const MSG_AUTH: u8 = b'R';
+pub const MSG_PARAM_STATUS: u8 = b'S';
+pub const MSG_READY_FOR_QUERY: u8 = b'Z';
+pub const MSG_ROW_DESC: u8 = b'T';
+pub const MSG_DATA_ROW: u8 = b'D';
 pub const MSG_COMMAND_COMPLETE: u8 = b'C';
-pub const MSG_ERROR_RESPONSE:   u8 = b'E';
-pub const MSG_NOTICE_RESPONSE:  u8 = b'N';
+pub const MSG_ERROR_RESPONSE: u8 = b'E';
+pub const MSG_NOTICE_RESPONSE: u8 = b'N';
 
 // ── Frontend encoders ─────────────────────────────────────────────────────────
 
@@ -170,9 +170,16 @@ fn decode_row_description(payload: &[u8]) -> Result<BackendMessage> {
         pos = next;
         // table_oid(4) + attr_num(2) + type_oid(4) + type_size(2) + type_modifier(4) + format(2)
         if pos + 18 > payload.len() {
-            return Err(DbError::Protocol("RowDescription column entry truncated".into()));
+            return Err(DbError::Protocol(
+                "RowDescription column entry truncated".into(),
+            ));
         }
-        let type_oid = u32::from_be_bytes([payload[pos+6], payload[pos+7], payload[pos+8], payload[pos+9]]);
+        let type_oid = u32::from_be_bytes([
+            payload[pos + 6],
+            payload[pos + 7],
+            payload[pos + 8],
+            payload[pos + 9],
+        ]);
         pos += 18;
         columns.push(ColumnDesc {
             name,
@@ -194,7 +201,12 @@ fn decode_data_row(payload: &[u8]) -> Result<BackendMessage> {
         if pos + 4 > payload.len() {
             return Err(DbError::Protocol("DataRow field length truncated".into()));
         }
-        let len = i32::from_be_bytes([payload[pos], payload[pos+1], payload[pos+2], payload[pos+3]]);
+        let len = i32::from_be_bytes([
+            payload[pos],
+            payload[pos + 1],
+            payload[pos + 2],
+            payload[pos + 3],
+        ]);
         pos += 4;
         if len == -1 {
             fields.push(None); // SQL NULL
@@ -203,7 +215,7 @@ fn decode_data_row(payload: &[u8]) -> Result<BackendMessage> {
             if pos + len > payload.len() {
                 return Err(DbError::Protocol("DataRow field data truncated".into()));
             }
-            fields.push(Some(payload[pos..pos+len].to_vec()));
+            fields.push(Some(payload[pos..pos + len].to_vec()));
             pos += len;
         }
     }
@@ -223,7 +235,9 @@ fn decode_error_response(payload: &[u8]) -> Result<BackendMessage> {
     while pos < payload.len() {
         let field_type = payload[pos];
         pos += 1;
-        if field_type == 0 { break; }
+        if field_type == 0 {
+            break;
+        }
         let (value, next) = read_cstring(payload, pos)?;
         pos = next;
         match field_type {
@@ -233,7 +247,11 @@ fn decode_error_response(payload: &[u8]) -> Result<BackendMessage> {
             _ => {}
         }
     }
-    Ok(BackendMessage::ErrorResponse { code, message, detail })
+    Ok(BackendMessage::ErrorResponse {
+        code,
+        message,
+        detail,
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -275,14 +293,22 @@ mod tests {
         let mut payload = 5i32.to_be_bytes().to_vec();
         payload.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]);
         let msg = decode_backend(MSG_AUTH, &payload).unwrap();
-        assert!(matches!(msg, BackendMessage::AuthMd5 { salt: [0xAA, 0xBB, 0xCC, 0xDD] }));
+        assert!(matches!(
+            msg,
+            BackendMessage::AuthMd5 {
+                salt: [0xAA, 0xBB, 0xCC, 0xDD]
+            }
+        ));
     }
 
     #[test]
     fn decode_ready_for_query() {
         let payload = vec![b'I'];
         let msg = decode_backend(MSG_READY_FOR_QUERY, &payload).unwrap();
-        assert!(matches!(msg, BackendMessage::ReadyForQuery { status: b'I' }));
+        assert!(matches!(
+            msg,
+            BackendMessage::ReadyForQuery { status: b'I' }
+        ));
     }
 
     #[test]
@@ -309,13 +335,20 @@ mod tests {
     #[test]
     fn decode_error_response_extracts_fields() {
         let mut payload = Vec::new();
-        payload.push(b'C'); write_cstring(&mut payload, "23505");
-        payload.push(b'M'); write_cstring(&mut payload, "duplicate key");
-        payload.push(b'D'); write_cstring(&mut payload, "Key (id)=(1) already exists.");
+        payload.push(b'C');
+        write_cstring(&mut payload, "23505");
+        payload.push(b'M');
+        write_cstring(&mut payload, "duplicate key");
+        payload.push(b'D');
+        write_cstring(&mut payload, "Key (id)=(1) already exists.");
         payload.push(0);
         let msg = decode_backend(MSG_ERROR_RESPONSE, &payload).unwrap();
         match msg {
-            BackendMessage::ErrorResponse { code, message, detail } => {
+            BackendMessage::ErrorResponse {
+                code,
+                message,
+                detail,
+            } => {
                 assert_eq!(code, "23505");
                 assert_eq!(message, "duplicate key");
                 assert_eq!(detail.unwrap(), "Key (id)=(1) already exists.");

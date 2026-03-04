@@ -52,7 +52,11 @@ impl LocalQueue {
                 Box::from_raw(Box::into_raw(boxed_slice) as *mut [Option<Arc<TaskHeader>>; CAPACITY])
             }
         };
-        Self { buf, head: 0, tail: 0 }
+        Self {
+            buf,
+            head: 0,
+            tail: 0,
+        }
     }
 
     /// Number of items currently held.
@@ -124,7 +128,9 @@ pub(crate) struct GlobalQueue {
 
 impl GlobalQueue {
     pub(crate) fn new() -> Self {
-        Self { inner: Mutex::new(VecDeque::new()) }
+        Self {
+            inner: Mutex::new(VecDeque::new()),
+        }
     }
 
     /// Append `header` to the back of the queue.
@@ -243,7 +249,10 @@ mod tests {
         }
         let mut local = LocalQueue::new();
         let stolen = gq.steal_batch(&mut local);
-        assert!(stolen >= 1 && stolen <= 4, "should steal ~half: got {stolen}");
+        assert!(
+            (1..=4).contains(&stolen),
+            "should steal ~half: got {stolen}"
+        );
         assert_eq!(local.len(), stolen);
     }
 }

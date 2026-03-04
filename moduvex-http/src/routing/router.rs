@@ -19,7 +19,7 @@ use crate::extract::IntoHandler;
 use crate::request::Request;
 use crate::response::Response;
 use crate::routing::method::Method;
-use crate::routing::path::{PathSegment, match_path, parse_pattern};
+use crate::routing::path::{match_path, parse_pattern, PathSegment};
 
 // ── Handler type-erasure ───────────────────────────────────────────────────────
 
@@ -46,9 +46,9 @@ where
 
 /// A single registered route entry.
 struct RouteEntry {
-    method:   Method,
+    method: Method,
     segments: Vec<PathSegment>,
-    handler:  Arc<BoxHandler>,
+    handler: Arc<BoxHandler>,
 }
 
 // ── Match result ──────────────────────────────────────────────────────────────
@@ -65,14 +65,17 @@ pub struct RouteMatch<'r> {
 
 /// HTTP router: maps (method, path) → handler.
 pub struct Router {
-    routes:   Vec<RouteEntry>,
+    routes: Vec<RouteEntry>,
     fallback: Option<Arc<BoxHandler>>,
 }
 
 impl Router {
     /// Create an empty router.
     pub fn new() -> Self {
-        Self { routes: Vec::new(), fallback: None }
+        Self {
+            routes: Vec::new(),
+            fallback: None,
+        }
     }
 
     // ── Route registration (extractor-aware) ──────────────────────────────
@@ -82,7 +85,7 @@ impl Router {
         self.routes.push(RouteEntry {
             method,
             segments: parse_pattern(pattern),
-            handler:  Arc::new(handler.into_box_handler()),
+            handler: Arc::new(handler.into_box_handler()),
         });
         self
     }
@@ -125,9 +128,9 @@ impl Router {
             let mut merged = prefix_segs;
             merged.extend(entry.segments);
             self.routes.push(RouteEntry {
-                method:   entry.method,
+                method: entry.method,
                 segments: merged,
-                handler:  entry.handler,
+                handler: entry.handler,
             });
         }
         self
@@ -150,9 +153,14 @@ impl Router {
 
     fn lookup_method<'r>(&'r self, method: Method, path: &str) -> Option<RouteMatch<'r>> {
         for entry in &self.routes {
-            if entry.method != method { continue; }
+            if entry.method != method {
+                continue;
+            }
             if let Some(params) = match_path(&entry.segments, path) {
-                return Some(RouteMatch { handler: &entry.handler, params });
+                return Some(RouteMatch {
+                    handler: &entry.handler,
+                    params,
+                });
             }
         }
         None
@@ -165,7 +173,9 @@ impl Router {
 }
 
 impl Default for Router {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -206,7 +216,9 @@ mod tests {
 
     #[test]
     fn nested_router() {
-        async fn handler(_req: Request) -> Response { Response::new(StatusCode::OK) }
+        async fn handler(_req: Request) -> Response {
+            Response::new(StatusCode::OK)
+        }
         let api = Router::new().get("/users", handler);
         let root = Router::new().nest("/api/v1", api);
         assert!(root.lookup(Method::GET, "/api/v1/users").is_some());

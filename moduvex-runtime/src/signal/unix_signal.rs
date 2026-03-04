@@ -125,8 +125,7 @@ fn install_handler(signum: libc::c_int, write_fd: i32) -> io::Result<()> {
 }
 
 /// Global write-fd accessible from the bare signal handler.
-static SIGNAL_WRITE_FD: std::sync::atomic::AtomicI32 =
-    std::sync::atomic::AtomicI32::new(-1);
+static SIGNAL_WRITE_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
 /// The actual signal handler. Must be async-signal-safe.
 ///
@@ -134,7 +133,9 @@ static SIGNAL_WRITE_FD: std::sync::atomic::AtomicI32 =
 /// calls `write(2)`, which is listed as async-signal-safe by POSIX.
 extern "C" fn signal_handler(_signum: libc::c_int) {
     let fd = SIGNAL_WRITE_FD.load(std::sync::atomic::Ordering::Relaxed);
-    if fd == -1 { return; }
+    if fd == -1 {
+        return;
+    }
     let b: u8 = 1;
     // SAFETY: `fd` is the write end of our non-blocking pipe; writing one byte
     // is async-signal-safe. We intentionally ignore the return value because
@@ -161,9 +162,15 @@ pub(crate) fn on_signal_readable() {
     loop {
         // SAFETY: `read_fd` is a valid O_NONBLOCK fd; `buf` is a valid buffer.
         let n = unsafe {
-            libc::read(state.read_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+            libc::read(
+                state.read_fd,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+            )
         };
-        if n <= 0 { break; } // EAGAIN or EOF
+        if n <= 0 {
+            break;
+        } // EAGAIN or EOF
     }
 
     // We can't distinguish SIGINT from SIGTERM from a single byte; wake all waiters.
@@ -248,7 +255,7 @@ mod tests {
     #[test]
     fn signal_write_fd_set_after_init() {
         // After init the write fd must be a valid (>= 0) file descriptor.
-        let _ = signal(SignalKind::Terminate).expect("init");
+        let _sig = signal(SignalKind::Terminate).expect("init");
         assert!(
             SIGNAL_WRITE_FD.load(std::sync::atomic::Ordering::Relaxed) >= 0,
             "write_fd not set after init"
@@ -258,7 +265,7 @@ mod tests {
     #[test]
     fn self_pipe_read_fd_registered() {
         // Verify the read end was registered with the reactor (no panic = pass).
-        let _ = signal(SignalKind::Interrupt).expect("init");
+        let _sig = signal(SignalKind::Interrupt).expect("init");
         // Re-registering the same fd would panic or error; the fact that init
         // succeeded confirms registration happened.
     }

@@ -27,7 +27,7 @@
 pub mod unix_signal;
 
 #[cfg(unix)]
-pub use unix_signal::{Signal, SignalKind, signal};
+pub use unix_signal::{signal, Signal, SignalKind};
 
 // `SIGNAL_TOKEN` and `on_signal_readable` are `pub(crate)` in `unix_signal`
 // and will be used by the executor run loop when signal integration is wired
@@ -35,7 +35,7 @@ pub use unix_signal::{Signal, SignalKind, signal};
 // within the crate.
 #[cfg(unix)]
 #[allow(unused_imports)]
-pub(crate) use unix_signal::{SIGNAL_TOKEN, on_signal_readable};
+pub(crate) use unix_signal::{on_signal_readable, SIGNAL_TOKEN};
 
 // ── Windows stub ──────────────────────────────────────────────────────────────
 
@@ -74,4 +74,4 @@ mod windows_signal {
 }
 
 #[cfg(windows)]
-pub use windows_signal::{Signal, SignalKind, signal};
+pub use windows_signal::{signal, Signal, SignalKind};

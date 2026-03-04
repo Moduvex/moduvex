@@ -62,14 +62,8 @@ pub trait AsyncWrite {
     /// Flush any internal buffers to the OS.
     ///
     /// For kernel-backed sockets this is a no-op that returns `Ready(Ok(()))`.
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>>;
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>>;
 
     /// Initiate a half-close: shut down the write side of the connection.
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>>;
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>>;
 }

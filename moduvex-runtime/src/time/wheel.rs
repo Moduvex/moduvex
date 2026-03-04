@@ -19,8 +19,8 @@
 //! all timers in that slot are re-inserted at level N-1 (standard wheel cascade).
 
 use std::collections::HashMap;
-use std::time::Instant;
 use std::task::Waker;
+use std::time::Instant;
 
 /// Number of slots per wheel level (must be a power of 2).
 const SLOTS: usize = 64;
@@ -111,7 +111,11 @@ impl TimerWheel {
         let effective_ms = deadline_ms.max(self.last_tick_ms);
 
         let (level, slot) = self.level_slot(effective_ms);
-        self.wheel[level][slot].push(TimerEntry { id, deadline, waker });
+        self.wheel[level][slot].push(TimerEntry {
+            id,
+            deadline,
+            waker,
+        });
         self.index.insert(id, (level, slot));
 
         TimerId(id)
@@ -182,7 +186,9 @@ impl TimerWheel {
                 }
             }
 
-            if t >= to { break; }
+            if t >= to {
+                break;
+            }
             t += 1;
         }
 
@@ -253,7 +259,9 @@ mod tests {
             *Arc::from_raw(p as *const Mutex<bool>).lock().unwrap() = true;
         }
         unsafe fn wake_ref(p: *const ()) {
-            *(*(&p as *const *const () as *const Arc<Mutex<bool>>)).lock().unwrap() = true;
+            *(*(&p as *const *const () as *const Arc<Mutex<bool>>))
+                .lock()
+                .unwrap() = true;
         }
         unsafe fn drop_w(p: *const ()) {
             drop(Arc::from_raw(p as *const Mutex<bool>));
@@ -282,7 +290,9 @@ mod tests {
         // Tick at/after deadline — should fire.
         let wakers = wheel.tick(origin + Duration::from_millis(60));
         assert_eq!(wakers.len(), 1);
-        for w in wakers { w.wake(); }
+        for w in wakers {
+            w.wake();
+        }
         assert!(*flag.lock().unwrap(), "waker must have fired");
     }
 
@@ -317,7 +327,9 @@ mod tests {
         wheel.insert(origin, waker);
         let wakers = wheel.tick(origin + Duration::from_millis(1));
         assert_eq!(wakers.len(), 1);
-        for w in wakers { w.wake(); }
+        for w in wakers {
+            w.wake();
+        }
         assert!(*flag.lock().unwrap());
     }
 
@@ -330,9 +342,9 @@ mod tests {
         for i in 0u32..5 {
             let r = Arc::clone(&results);
             let flag = Arc::new(Mutex::new(false));
-            let waker = make_flag_waker(Arc::clone(&flag));
+            let _waker = make_flag_waker(Arc::clone(&flag));
             let _ = flag; // waker owns it now
-            // Re-build a waker that records the index.
+                          // Re-build a waker that records the index.
             let data = Box::into_raw(Box::new((i, r))) as *const ();
             type Payload = (u32, Arc<Mutex<Vec<u32>>>);
             unsafe fn clone_p(p: *const ()) -> RawWaker {
@@ -363,7 +375,9 @@ mod tests {
         // Single tick past all deadlines.
         let wakers = wheel.tick(origin + Duration::from_millis(60));
         assert_eq!(wakers.len(), 5);
-        for w in wakers { w.wake(); }
+        for w in wakers {
+            w.wake();
+        }
         let v = results.lock().unwrap();
         assert_eq!(v.len(), 5);
     }

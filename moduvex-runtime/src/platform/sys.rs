@@ -82,7 +82,11 @@ pub struct Event {
 impl Event {
     #[inline]
     pub(crate) fn new(token: usize, readable: bool, writable: bool) -> Self {
-        Self { token, readable, writable }
+        Self {
+            token,
+            readable,
+            writable,
+        }
     }
 }
 
@@ -102,7 +106,7 @@ pub fn events_with_capacity(cap: usize) -> Events {
 #[cfg(unix)]
 mod unix_impl {
     use super::*;
-    use libc::{c_int, fcntl, O_NONBLOCK, F_GETFL, F_SETFL};
+    use libc::{c_int, fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
 
     /// Set a file descriptor to non-blocking mode.
     ///
@@ -163,7 +167,7 @@ mod unix_impl {
 }
 
 #[cfg(unix)]
-pub use unix_impl::{set_nonblocking, close_fd, create_pipe};
+pub use unix_impl::{close_fd, create_pipe, set_nonblocking};
 
 // ── Windows stubs ─────────────────────────────────────────────────────────────
 
@@ -174,7 +178,10 @@ mod windows_impl {
     /// Set a handle to non-blocking mode (stub — requires WSA or IOCP).
     pub fn set_nonblocking(_handle: RawSource) -> io::Result<()> {
         // TODO: implement via ioctlsocket / SetNamedPipeHandleState
-        Err(io::Error::new(io::ErrorKind::Unsupported, "not yet implemented on Windows"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "not yet implemented on Windows",
+        ))
     }
 
     /// Close an OS handle.
@@ -192,12 +199,15 @@ mod windows_impl {
     /// Create a pipe pair returning (read_handle, write_handle).
     pub fn create_pipe() -> io::Result<(RawSource, RawSource)> {
         // TODO: implement via CreatePipe / anonymous pipe
-        Err(io::Error::new(io::ErrorKind::Unsupported, "not yet implemented on Windows"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "not yet implemented on Windows",
+        ))
     }
 }
 
 #[cfg(windows)]
-pub use windows_impl::{set_nonblocking, close_fd, create_pipe};
+pub use windows_impl::{close_fd, create_pipe, set_nonblocking};
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

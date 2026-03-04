@@ -27,7 +27,9 @@ pub struct AppContext {
 impl AppContext {
     /// Create a new, empty `AppContext`.
     pub fn new() -> Self {
-        Self { singletons: TypeMap::new() }
+        Self {
+            singletons: TypeMap::new(),
+        }
     }
 
     /// Store a singleton `Arc<T>` in the context.
@@ -64,7 +66,9 @@ impl AppContext {
 }
 
 impl Default for AppContext {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // SAFETY: TypeMap is Send + Sync (RwLock<HashMap<...>> with Send + Sync values)
@@ -89,7 +93,10 @@ pub struct RequestContext {
 impl RequestContext {
     /// Create a new `RequestContext` backed by the given `AppContext`.
     pub fn new(app: Arc<AppContext>) -> Self {
-        Self { app, extensions: TypeMap::new() }
+        Self {
+            app,
+            extensions: TypeMap::new(),
+        }
     }
 
     /// Access the shared `AppContext`.

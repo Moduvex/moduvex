@@ -4,14 +4,14 @@
 //! The underlying fd is registered with the reactor; `readable()` / `writable()`
 //! futures from `IoSource` are used to suspend until the OS signals readiness.
 
-use std::io;
 use std::future::Future;
+use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate::reactor::source::{IoSource, next_token};
-use crate::platform::sys::{Interest, set_nonblocking};
+use crate::platform::sys::{set_nonblocking, Interest};
+use crate::reactor::source::{next_token, IoSource};
 
 use super::{AsyncRead, AsyncWrite};
 
@@ -168,7 +168,9 @@ enum ConnectState {
 
 impl ConnectFuture {
     fn new(addr: SocketAddr) -> Self {
-        Self { state: ConnectState::Init(addr) }
+        Self {
+            state: ConnectState::Init(addr),
+        }
     }
 }
 
@@ -236,9 +238,7 @@ impl Future for ConnectFuture {
                             });
                             unsafe { libc::close(fd) };
                             self.state = ConnectState::Done;
-                            return Poll::Ready(Err(
-                                io::Error::from_raw_os_error(os_err)
-                            ));
+                            return Poll::Ready(Err(io::Error::from_raw_os_error(os_err)));
                         }
                         Ok(None) => {
                             // SO_ERROR == 0 means connected. But we may be
@@ -260,8 +260,7 @@ impl Future for ConnectFuture {
                 }
 
                 ConnectState::Done => {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Poll::Ready(Err(io::Error::other(
                         "ConnectFuture polled after completion",
                     )));
                 }
@@ -274,9 +273,7 @@ impl Drop for ConnectFuture {
     fn drop(&mut self) {
         if let ConnectState::Connecting { fd, token, .. } = self.state {
             // Clean up reactor and close fd if the future is dropped mid-connect.
-            let _ = crate::reactor::with_reactor_mut(|r| {
-                r.deregister_with_token(fd, token)
-            });
+            let _ = crate::reactor::with_reactor_mut(|r| r.deregister_with_token(fd, token));
             // SAFETY: fd is a valid socket we own; future is being dropped.
             unsafe { libc::close(fd) };
         }
@@ -292,7 +289,10 @@ fn is_writable_now(fd: i32) -> bool {
         let mut write_set: libc::fd_set = std::mem::zeroed();
         libc::FD_ZERO(&mut write_set);
         libc::FD_SET(fd, &mut write_set);
-        let mut tv = libc::timeval { tv_sec: 0, tv_usec: 0 };
+        let mut tv = libc::timeval {
+            tv_sec: 0,
+            tv_usec: 0,
+        };
         let n = libc::select(
             fd + 1,
             std::ptr::null_mut(),
@@ -371,13 +371,7 @@ fn peer_addr(fd: i32) -> io::Result<SocketAddr> {
     let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
     let mut len = std::mem::size_of_val(&addr) as libc::socklen_t;
     // SAFETY: `fd` is a valid connected socket; `addr` is large enough.
-    let rc = unsafe {
-        libc::getpeername(
-            fd,
-            &mut addr as *mut _ as *mut libc::sockaddr,
-            &mut len,
-        )
-    };
+    let rc = unsafe { libc::getpeername(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut len) };
     if rc == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -389,13 +383,7 @@ fn local_addr(fd: i32) -> io::Result<SocketAddr> {
     let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
     let mut len = std::mem::size_of_val(&addr) as libc::socklen_t;
     // SAFETY: `fd` is a valid socket; `addr` is large enough.
-    let rc = unsafe {
-        libc::getsockname(
-            fd,
-            &mut addr as *mut _ as *mut libc::sockaddr,
-            &mut len,
-        )
-    };
+    let rc = unsafe { libc::getsockname(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut len) };
     if rc == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -412,8 +400,8 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (*const libc::sockaddr, libc::socklen_
             // SAFETY: zeroed() gives a valid bit pattern; we fill every field.
             let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
             sin.sin_family = libc::AF_INET as libc::sa_family_t;
-            sin.sin_port   = v4.port().to_be();
-            sin.sin_addr   = libc::in_addr {
+            sin.sin_port = v4.port().to_be();
+            sin.sin_addr = libc::in_addr {
                 s_addr: u32::from_be_bytes(octets).to_be(),
             };
             let boxed = Box::new(sin);
@@ -424,10 +412,12 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (*const libc::sockaddr, libc::socklen_
         SocketAddr::V6(v6) => {
             // SAFETY: zeroed() gives a valid bit pattern; we fill every field.
             let mut sin6: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
-            sin6.sin6_family   = libc::AF_INET6 as libc::sa_family_t;
-            sin6.sin6_port     = v6.port().to_be();
+            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+            sin6.sin6_port = v6.port().to_be();
             sin6.sin6_flowinfo = v6.flowinfo();
-            sin6.sin6_addr     = libc::in6_addr { s6_addr: v6.ip().octets() };
+            sin6.sin6_addr = libc::in6_addr {
+                s6_addr: v6.ip().octets(),
+            };
             sin6.sin6_scope_id = v6.scope_id();
             let boxed = Box::new(sin6);
             let ptr = Box::into_raw(boxed) as *const libc::sockaddr;
@@ -465,7 +455,10 @@ fn sockaddr_to_socketaddr(
             let ip = std::net::Ipv6Addr::from(addr.sin6_addr.s6_addr);
             let port = u16::from_be(addr.sin6_port);
             Ok(SocketAddr::V6(std::net::SocketAddrV6::new(
-                ip, port, addr.sin6_flowinfo, addr.sin6_scope_id,
+                ip,
+                port,
+                addr.sin6_flowinfo,
+                addr.sin6_scope_id,
             )))
         }
         _ => Err(io::Error::new(
@@ -480,18 +473,20 @@ fn sockaddr_to_socketaddr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::TcpListener;
     use crate::executor::block_on_with_spawn;
+    use crate::net::TcpListener;
 
     /// Poll-based async read: keeps polling until `n` bytes are gathered.
     async fn read_exact(stream: &mut TcpStream, buf: &mut [u8]) {
         use std::future::poll_fn;
         let mut filled = 0;
         while filled < buf.len() {
-            let n = poll_fn(|cx| {
-                Pin::new(&mut *stream).poll_read(cx, &mut buf[filled..])
-            }).await.expect("read_exact: io error");
-            if n == 0 { break; } // EOF
+            let n = poll_fn(|cx| Pin::new(&mut *stream).poll_read(cx, &mut buf[filled..]))
+                .await
+                .expect("read_exact: io error");
+            if n == 0 {
+                break;
+            } // EOF
             filled += n;
         }
     }
@@ -501,9 +496,9 @@ mod tests {
         use std::future::poll_fn;
         let mut sent = 0;
         while sent < buf.len() {
-            let n = poll_fn(|cx| {
-                Pin::new(&mut *stream).poll_write(cx, &buf[sent..])
-            }).await.expect("write_all: io error");
+            let n = poll_fn(|cx| Pin::new(&mut *stream).poll_write(cx, &buf[sent..]))
+                .await
+                .expect("write_all: io error");
             sent += n;
         }
     }

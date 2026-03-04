@@ -4,14 +4,14 @@
 //! `accept()` returns a future that resolves when the OS has a connection
 //! ready, driving the reactor via the `IoSource` readable future.
 
+use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
-use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate::reactor::source::{IoSource, next_token};
-use crate::platform::sys::{Interest, set_nonblocking};
+use crate::platform::sys::{set_nonblocking, Interest};
+use crate::reactor::source::{next_token, IoSource};
 
 use super::TcpStream;
 
@@ -74,7 +74,7 @@ impl<'a> Future for AcceptFuture<'a> {
         // Try to accept immediately first (edge-triggered — may already be ready).
         match try_accept(self.listener.source.raw()) {
             Ok(Some(result)) => return Poll::Ready(Ok(result)),
-            Ok(None) => {}          // WouldBlock — fall through to register waker
+            Ok(None) => {} // WouldBlock — fall through to register waker
             Err(e) => return Poll::Ready(Err(e)),
         }
 
@@ -185,13 +185,7 @@ fn raw_local_addr(fd: i32) -> io::Result<SocketAddr> {
     let mut len = std::mem::size_of_val(&addr) as libc::socklen_t;
     // SAFETY: `fd` is a valid bound socket; `addr` buffer is large enough for
     // either sockaddr_in or sockaddr_in6.
-    let rc = unsafe {
-        libc::getsockname(
-            fd,
-            &mut addr as *mut _ as *mut libc::sockaddr,
-            &mut len,
-        )
-    };
+    let rc = unsafe { libc::getsockname(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut len) };
     if rc == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -210,23 +204,31 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (*const libc::sockaddr, libc::socklen_
             // platforms that require it (macOS/BSD).
             let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
             sin.sin_family = libc::AF_INET as libc::sa_family_t;
-            sin.sin_port   = v4.port().to_be();
-            sin.sin_addr   = libc::in_addr {
+            sin.sin_port = v4.port().to_be();
+            sin.sin_addr = libc::in_addr {
                 s_addr: u32::from_be_bytes(octets).to_be(),
             };
             let ptr = Box::into_raw(Box::new(sin)) as *const libc::sockaddr;
-            (ptr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
+            (
+                ptr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            )
         }
         SocketAddr::V6(v6) => {
             // SAFETY: same rationale as IPv4 above.
             let mut sin6: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
-            sin6.sin6_family   = libc::AF_INET6 as libc::sa_family_t;
-            sin6.sin6_port     = v6.port().to_be();
+            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+            sin6.sin6_port = v6.port().to_be();
             sin6.sin6_flowinfo = v6.flowinfo();
-            sin6.sin6_addr     = libc::in6_addr { s6_addr: v6.ip().octets() };
+            sin6.sin6_addr = libc::in6_addr {
+                s6_addr: v6.ip().octets(),
+            };
             sin6.sin6_scope_id = v6.scope_id();
             let ptr = Box::into_raw(Box::new(sin6)) as *const libc::sockaddr;
-            (ptr, std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t)
+            (
+                ptr,
+                std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+            )
         }
     }
 }
@@ -253,15 +255,18 @@ pub(super) fn sockaddr_to_socketaddr(
             // the first sizeof(sockaddr_in) bytes as sockaddr_in is valid.
             let v4: &libc::sockaddr_in =
                 unsafe { &*(addr as *const _ as *const libc::sockaddr_in) };
-            let ip   = std::net::Ipv4Addr::from(u32::from_be(v4.sin_addr.s_addr));
+            let ip = std::net::Ipv4Addr::from(u32::from_be(v4.sin_addr.s_addr));
             let port = u16::from_be(v4.sin_port);
             Ok(SocketAddr::V4(std::net::SocketAddrV4::new(ip, port)))
         }
         libc::AF_INET6 if len >= std::mem::size_of::<libc::sockaddr_in6>() as u32 => {
-            let ip   = std::net::Ipv6Addr::from(addr.sin6_addr.s6_addr);
+            let ip = std::net::Ipv6Addr::from(addr.sin6_addr.s6_addr);
             let port = u16::from_be(addr.sin6_port);
             Ok(SocketAddr::V6(std::net::SocketAddrV6::new(
-                ip, port, addr.sin6_flowinfo, addr.sin6_scope_id,
+                ip,
+                port,
+                addr.sin6_flowinfo,
+                addr.sin6_scope_id,
             )))
         }
         _ => Err(io::Error::new(
@@ -279,8 +284,7 @@ mod tests {
 
     #[test]
     fn bind_and_local_addr() {
-        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
-            .expect("bind failed");
+        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).expect("bind failed");
         let addr = listener.local_addr().expect("local_addr failed");
         assert_eq!(addr.ip().to_string(), "127.0.0.1");
         assert!(addr.port() > 0, "assigned port must be non-zero");

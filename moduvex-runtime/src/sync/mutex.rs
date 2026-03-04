@@ -85,7 +85,9 @@ impl<T> Future for LockFuture<'_, T> {
         let mut g = self.inner.lock().unwrap();
         if !g.locked {
             g.locked = true;
-            Poll::Ready(MutexGuard { inner: Arc::clone(self.inner) })
+            Poll::Ready(MutexGuard {
+                inner: Arc::clone(self.inner),
+            })
         } else {
             g.waiters.push_back(cx.waker().clone());
             Poll::Pending
@@ -136,8 +138,8 @@ impl<T> Drop for MutexGuard<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc as StdArc;
     use crate::executor::{block_on, block_on_with_spawn, spawn};
+    use std::sync::Arc as StdArc;
 
     #[test]
     fn lock_and_mutate() {

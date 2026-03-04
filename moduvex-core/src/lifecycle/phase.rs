@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use crate::error::{ModuvexError, Result, classify::LifecycleError};
+use crate::error::{classify::LifecycleError, ModuvexError, Result};
 
 // ── Phase ─────────────────────────────────────────────────────────────────────
 
@@ -57,12 +57,10 @@ impl Phase {
         if from.can_transition_to(to) {
             Ok(to)
         } else {
-            Err(ModuvexError::Lifecycle(
-                LifecycleError::new(format!(
-                    "invalid lifecycle transition: {:?} → {:?}",
-                    from, to
-                ))
-            ))
+            Err(ModuvexError::Lifecycle(LifecycleError::new(format!(
+                "invalid lifecycle transition: {:?} → {:?}",
+                from, to
+            ))))
         }
     }
 
@@ -71,13 +69,13 @@ impl Phase {
     /// Returns `None` for `Ready` (awaiting shutdown signal) and `Stopped`.
     pub fn next_startup_phase(self) -> Option<Phase> {
         match self {
-            Phase::Config   => Some(Phase::Validate),
+            Phase::Config => Some(Phase::Validate),
             Phase::Validate => Some(Phase::Init),
-            Phase::Init     => Some(Phase::Start),
-            Phase::Start    => Some(Phase::Ready),
-            Phase::Ready    => None,
+            Phase::Init => Some(Phase::Start),
+            Phase::Start => Some(Phase::Ready),
+            Phase::Ready => None,
             Phase::Stopping => Some(Phase::Stopped),
-            Phase::Stopped  => None,
+            Phase::Stopped => None,
         }
     }
 }
@@ -85,13 +83,13 @@ impl Phase {
 impl fmt::Display for Phase {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Phase::Config   => write!(f, "Config"),
+            Phase::Config => write!(f, "Config"),
             Phase::Validate => write!(f, "Validate"),
-            Phase::Init     => write!(f, "Init"),
-            Phase::Start    => write!(f, "Start"),
-            Phase::Ready    => write!(f, "Ready"),
+            Phase::Init => write!(f, "Init"),
+            Phase::Start => write!(f, "Start"),
+            Phase::Ready => write!(f, "Ready"),
             Phase::Stopping => write!(f, "Stopping"),
-            Phase::Stopped  => write!(f, "Stopped"),
+            Phase::Stopped => write!(f, "Stopped"),
         }
     }
 }
@@ -105,14 +103,18 @@ mod tests {
     #[test]
     fn valid_startup_sequence() {
         let phases = [
-            Phase::Config, Phase::Validate, Phase::Init,
-            Phase::Start,  Phase::Ready,
+            Phase::Config,
+            Phase::Validate,
+            Phase::Init,
+            Phase::Start,
+            Phase::Ready,
         ];
         for window in phases.windows(2) {
             assert!(
                 window[0].can_transition_to(window[1]),
                 "{:?} -> {:?} should be valid",
-                window[0], window[1]
+                window[0],
+                window[1]
             );
         }
     }

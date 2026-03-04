@@ -75,7 +75,13 @@ impl std::error::Error for RecvError {}
 /// Create a new one-shot channel, returning `(Sender, Receiver)`.
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let inner = Arc::new(Inner::new());
-    (Sender { inner: inner.clone(), sent: false }, Receiver { inner })
+    (
+        Sender {
+            inner: inner.clone(),
+            sent: false,
+        },
+        Receiver { inner },
+    )
 }
 
 // ── Sender ────────────────────────────────────────────────────────────────────
@@ -102,7 +108,7 @@ impl<T> Sender<T> {
         match self.inner.state.compare_exchange(
             EMPTY,
             SENT,
-            Ordering::Release,  // publish the write above
+            Ordering::Release, // publish the write above
             Ordering::Relaxed,
         ) {
             Ok(_) => {
@@ -186,12 +192,10 @@ impl<T> Drop for Receiver<T> {
         // Inform the sender (if still alive) that nobody will read the value.
         // CAS EMPTY → CLOSED; if already SENT we just leave the value to be
         // dropped when `inner` is freed.
-        let _ = self.inner.state.compare_exchange(
-            EMPTY,
-            CLOSED,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        );
+        let _ =
+            self.inner
+                .state
+                .compare_exchange(EMPTY, CLOSED, Ordering::Relaxed, Ordering::Relaxed);
     }
 }
 

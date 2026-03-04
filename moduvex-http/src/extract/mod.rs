@@ -42,7 +42,9 @@ impl FromRequest for Request {
 }
 
 impl IntoResponse for std::convert::Infallible {
-    fn into_response(self) -> Response { match self {} }
+    fn into_response(self) -> Response {
+        match self {}
+    }
 }
 
 // ── IntoHandler trait ────────────────────────────────────────────────────────
@@ -127,7 +129,9 @@ mod tests {
     use crate::response::Response;
     use crate::status::StatusCode;
 
-    async fn no_args() -> &'static str { "hello" }
+    async fn no_args() -> &'static str {
+        "hello"
+    }
 
     async fn one_arg(_req: Request) -> Response {
         Response::new(StatusCode::OK)

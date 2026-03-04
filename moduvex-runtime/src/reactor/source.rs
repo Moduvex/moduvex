@@ -8,14 +8,14 @@
 //! reactor's `WakerRegistry`. When the reactor fires an event for this token
 //! the stored waker is called, re-scheduling the waiting task.
 
-use std::io;
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
-use crate::platform::sys::{Interest, RawSource};
 use super::{with_reactor, with_reactor_mut};
+use crate::platform::sys::{Interest, RawSource};
 
 /// Global counter for assigning unique tokens to `IoSource` instances.
 static TOKEN_COUNTER: AtomicUsize = AtomicUsize::new(1);
@@ -93,14 +93,20 @@ impl IoSource {
     /// When the reactor fires a READABLE event for this token, the waker fires
     /// and the next poll returns `Ready(Ok(()))`.
     pub fn readable(&self) -> ReadableFuture<'_> {
-        ReadableFuture { source: self, armed: false }
+        ReadableFuture {
+            source: self,
+            armed: false,
+        }
     }
 
     /// Returns a future that resolves once the source is writable.
     ///
     /// Same waker integration as `readable()` but for WRITABLE events.
     pub fn writable(&self) -> WritableFuture<'_> {
-        WritableFuture { source: self, armed: false }
+        WritableFuture {
+            source: self,
+            armed: false,
+        }
     }
 }
 
@@ -133,7 +139,8 @@ impl<'a> Future for ReadableFuture<'a> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Store the waker so the reactor can wake us when the fd is readable.
         with_reactor_mut(|r| {
-            r.wakers.set_read_waker(self.source.token, cx.waker().clone());
+            r.wakers
+                .set_read_waker(self.source.token, cx.waker().clone());
         });
 
         // Arm READABLE interest on first poll only (avoid redundant syscalls).
@@ -164,7 +171,8 @@ impl<'a> Future for WritableFuture<'a> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Store the waker so the reactor can wake us when the fd is writable.
         with_reactor_mut(|r| {
-            r.wakers.set_write_waker(self.source.token, cx.waker().clone());
+            r.wakers
+                .set_write_waker(self.source.token, cx.waker().clone());
         });
 
         if !self.armed {
@@ -189,8 +197,7 @@ mod tests {
     #[test]
     fn io_source_registers_on_construction() {
         let (r, w) = create_pipe().unwrap();
-        let src = IoSource::new(r, next_token(), Interest::READABLE)
-            .expect("IoSource::new failed");
+        let src = IoSource::new(r, next_token(), Interest::READABLE).expect("IoSource::new failed");
         assert!(src.registered.load(Ordering::Acquire));
         // Drop triggers deregister; close the fds manually after drop.
         drop(src);

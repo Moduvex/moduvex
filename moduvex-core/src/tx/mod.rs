@@ -21,16 +21,16 @@ pub trait TransactionBoundary: Send + Sync + 'static {
     type Tx: Send + 'static;
 
     /// Begin a new transaction, returning a handle.
-    fn begin<'a>(&'a self)
-        -> Pin<Box<dyn Future<Output = Result<Self::Tx>> + Send + 'a>>;
+    fn begin<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<Self::Tx>> + Send + 'a>>;
 
     /// Commit the transaction.
-    fn commit<'a>(&'a self, tx: Self::Tx)
-        -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn commit<'a>(&'a self, tx: Self::Tx) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 
     /// Roll back the transaction.
-    fn rollback<'a>(&'a self, tx: Self::Tx)
-        -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn rollback<'a>(
+        &'a self,
+        tx: Self::Tx,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -47,21 +47,21 @@ mod tests {
     impl TransactionBoundary for NoopBoundary {
         type Tx = NoopTx;
 
-        fn begin<'a>(&'a self)
-            -> Pin<Box<dyn Future<Output = Result<NoopTx>> + Send + 'a>>
-        {
+        fn begin<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<NoopTx>> + Send + 'a>> {
             Box::pin(async { Ok(NoopTx) })
         }
 
-        fn commit<'a>(&'a self, _tx: NoopTx)
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-        {
+        fn commit<'a>(
+            &'a self,
+            _tx: NoopTx,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
             Box::pin(async { Ok(()) })
         }
 
-        fn rollback<'a>(&'a self, _tx: NoopTx)
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-        {
+        fn rollback<'a>(
+            &'a self,
+            _tx: NoopTx,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
             Box::pin(async { Ok(()) })
         }
     }

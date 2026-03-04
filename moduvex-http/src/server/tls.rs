@@ -24,10 +24,10 @@ impl TlsConfig {
         cert_path: impl AsRef<std::path::Path>,
         key_path: impl AsRef<std::path::Path>,
     ) -> Result<Self, TlsConfigError> {
-        let cert_bytes = std::fs::read(cert_path)
-            .map_err(|e| TlsConfigError(format!("read cert: {e}")))?;
-        let key_bytes = std::fs::read(key_path)
-            .map_err(|e| TlsConfigError(format!("read key: {e}")))?;
+        let cert_bytes =
+            std::fs::read(cert_path).map_err(|e| TlsConfigError(format!("read cert: {e}")))?;
+        let key_bytes =
+            std::fs::read(key_path).map_err(|e| TlsConfigError(format!("read key: {e}")))?;
 
         let certs = rustls_pemfile::certs(&mut cert_bytes.as_slice())
             .collect::<Result<Vec<_>, _>>()
@@ -41,12 +41,18 @@ impl TlsConfig {
             .map_err(|e| TlsConfigError(format!("parse key: {e}")))?
             .ok_or_else(|| TlsConfigError("no private key found in PEM".into()))?;
 
-        Ok(Self { cert_chain: certs, private_key: key })
+        Ok(Self {
+            cert_chain: certs,
+            private_key: key,
+        })
     }
 
     /// Build a `rustls::ServerConfig` from this config.
     pub fn into_server_config(self) -> Result<rustls::ServerConfig, TlsConfigError> {
-        rustls::ServerConfig::builder()
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        rustls::ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(|e| TlsConfigError(format!("rustls protocol: {e}")))?
             .with_no_client_auth()
             .with_single_cert(self.cert_chain, self.private_key)
             .map_err(|e| TlsConfigError(format!("rustls config: {e}")))

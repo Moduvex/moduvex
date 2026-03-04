@@ -77,12 +77,15 @@ mod tests {
 
     #[test]
     fn parse_env_float() {
-        assert_eq!(parse_env_value("3.14"), Value::Float(3.14));
+        assert_eq!(parse_env_value("2.72"), Value::Float(2.72));
     }
 
     #[test]
     fn parse_env_string_fallback() {
-        assert_eq!(parse_env_value("localhost"), Value::String("localhost".into()));
+        assert_eq!(
+            parse_env_value("localhost"),
+            Value::String("localhost".into())
+        );
     }
 
     #[test]

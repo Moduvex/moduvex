@@ -56,17 +56,9 @@ pub fn expand(input: TokenStream) -> darling::Result<TokenStream> {
     let original_fields = match &input.data {
         syn::Data::Struct(s) => match &s.fields {
             syn::Fields::Named(n) => &n.named,
-            _ => {
-                return Err(darling::Error::unsupported_shape(
-                    "expected named struct",
-                ))
-            }
+            _ => return Err(darling::Error::unsupported_shape("expected named struct")),
         },
-        _ => {
-            return Err(darling::Error::unsupported_shape(
-                "expected struct",
-            ))
-        }
+        _ => return Err(darling::Error::unsupported_shape("expected struct")),
     };
 
     for (field_opts, orig_field) in fields.iter().zip(original_fields.iter()) {

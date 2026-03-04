@@ -12,8 +12,8 @@
 
 use std::io;
 
-use crate::platform::sys::{Events, Interest, RawSource};
 use super::ReactorBackend;
+use crate::platform::sys::{Events, Interest, RawSource};
 
 /// Windows IOCP-based reactor backend (not yet implemented).
 pub(crate) struct IocpReactor {
@@ -32,12 +32,7 @@ impl ReactorBackend for IocpReactor {
         todo!("IocpReactor::register")
     }
 
-    fn reregister(
-        &self,
-        _source: RawSource,
-        _token: usize,
-        _interest: Interest,
-    ) -> io::Result<()> {
+    fn reregister(&self, _source: RawSource, _token: usize, _interest: Interest) -> io::Result<()> {
         // TODO: Implement AFD-based IOCP reactor — see mio sys/windows/
         todo!("IocpReactor::reregister")
     }

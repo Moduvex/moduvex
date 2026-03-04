@@ -9,6 +9,9 @@ use std::sync::Arc;
 use crate::app::context::{AppContext, RequestContext};
 use crate::error::Result;
 
+/// Type alias for a request-scoped factory closure.
+type RequestFactory<T> = dyn Fn(&RequestContext) -> Result<T> + Send + Sync;
+
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 /// A factory that produces a value of type `Output` from the `AppContext`.
@@ -36,7 +39,9 @@ pub struct Singleton<T: Send + Sync + 'static> {
 impl<T: Send + Sync + 'static> Singleton<T> {
     /// Wrap an already-constructed value.
     pub fn new(value: T) -> Self {
-        Self { value: Arc::new(value) }
+        Self {
+            value: Arc::new(value),
+        }
     }
 
     /// Wrap an existing `Arc<T>`.
@@ -52,7 +57,9 @@ impl<T: Send + Sync + 'static> Singleton<T> {
 
 impl<T: Send + Sync + 'static> Clone for Singleton<T> {
     fn clone(&self) -> Self {
-        Self { value: Arc::clone(&self.value) }
+        Self {
+            value: Arc::clone(&self.value),
+        }
     }
 }
 
@@ -63,7 +70,7 @@ impl<T: Send + Sync + 'static> Clone for Singleton<T> {
 /// The factory closure captures `AppContext`-level dependencies at
 /// registration time so per-request creation is cheap.
 pub struct RequestScoped<T: Send + Sync + 'static> {
-    factory: Arc<dyn Fn(&RequestContext) -> Result<T> + Send + Sync>,
+    factory: Arc<RequestFactory<T>>,
 }
 
 impl<T: Send + Sync + 'static> RequestScoped<T> {
@@ -72,7 +79,9 @@ impl<T: Send + Sync + 'static> RequestScoped<T> {
     where
         F: Fn(&RequestContext) -> Result<T> + Send + Sync + 'static,
     {
-        Self { factory: Arc::new(factory) }
+        Self {
+            factory: Arc::new(factory),
+        }
     }
 
     /// Invoke the factory to produce a fresh `T` for the given request context.
@@ -83,7 +92,9 @@ impl<T: Send + Sync + 'static> RequestScoped<T> {
 
 impl<T: Send + Sync + 'static> Clone for RequestScoped<T> {
     fn clone(&self) -> Self {
-        Self { factory: Arc::clone(&self.factory) }
+        Self {
+            factory: Arc::clone(&self.factory),
+        }
     }
 }
 
@@ -144,8 +155,7 @@ mod tests {
     #[test]
     fn request_scoped_clone_shares_factory() {
         let app = Arc::new(AppContext::new());
-        let rs: RequestScoped<String> =
-            RequestScoped::new(|_| Ok("req-value".to_string()));
+        let rs: RequestScoped<String> = RequestScoped::new(|_| Ok("req-value".to_string()));
         let rs2 = rs.clone();
         let req = RequestContext::new(Arc::clone(&app));
         assert_eq!(rs2.create(&req).unwrap(), "req-value");

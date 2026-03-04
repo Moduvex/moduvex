@@ -32,11 +32,11 @@
 // ── Crate modules ─────────────────────────────────────────────────────────────
 
 pub mod error;
+pub mod migrate;
 pub mod pool;
 pub mod protocol;
 pub mod query;
 pub mod tx;
-pub mod migrate;
 
 // ── Top-level re-exports ──────────────────────────────────────────────────────
 
@@ -44,21 +44,21 @@ pub mod migrate;
 pub use error::{DbError, Result};
 
 // Pool
+pub use pool::health::{run_health_sweep, spawn_health_monitor, HealthMonitorConfig};
 pub use pool::{ConnectionPool, PoolConfig};
-pub use pool::health::{spawn_health_monitor, run_health_sweep, HealthMonitorConfig};
 
 // Protocol — raw PG types
-pub use protocol::postgres::{PgConnection, PgColumn, PgRow, PgRowSet};
+pub use protocol::postgres::{PgColumn, PgConnection, PgRow, PgRowSet};
 
 // Query layer — typed accessors
-pub use query::{Column, FromRow, Order, Param, QueryBuilder, Row, RowSet, ToParam};
-pub use query::param::substitute_params;
 pub use query::builder::QueryBuilder as Query;
+pub use query::param::substitute_params;
+pub use query::{Column, FromRow, Order, Param, QueryBuilder, Row, RowSet, ToParam};
 
 // Transaction
 pub use tx::{IsolationLevel, Transaction};
 pub use tx::{PoolTransactionBoundary, TxHandle};
 
 // Migration
+pub use migrate::runner::{load_migrations, parse_version, Migration};
 pub use migrate::{MigrationEngine, MigrationReport};
-pub use migrate::runner::{Migration, load_migrations, parse_version};

@@ -24,7 +24,7 @@ use crate::protocol::postgres::PgConnection;
 // ── PoolInner ─────────────────────────────────────────────────────────────────
 
 /// Guards the mutable pool state.
-struct PoolInner {
+pub(crate) struct PoolInner {
     /// Idle connections available for immediate checkout (LIFO).
     idle: VecDeque<IdleConn>,
     /// Total live connections (idle + checked-out).
@@ -34,7 +34,7 @@ struct PoolInner {
 }
 
 struct IdleConn {
-    conn:      PgConnection,
+    conn: PgConnection,
     /// When this connection was returned to the pool.
     idle_since: Instant,
 }
@@ -43,7 +43,7 @@ struct IdleConn {
 
 /// Async PostgreSQL connection pool.
 pub struct ConnectionPool {
-    cfg:   PoolConfig,
+    cfg: PoolConfig,
     inner: Arc<Mutex<PoolInner>>,
 }
 
@@ -53,8 +53,8 @@ impl ConnectionPool {
         cfg.validate().expect("invalid PoolConfig");
         Arc::new(Self {
             inner: Arc::new(Mutex::new(PoolInner {
-                idle:   VecDeque::new(),
-                live:   0,
+                idle: VecDeque::new(),
+                live: 0,
                 closed: false,
             })),
             cfg,
@@ -126,7 +126,10 @@ impl ConnectionPool {
             // conn drops here, closing the socket
             return;
         }
-        g.idle.push_back(IdleConn { conn, idle_since: Instant::now() });
+        g.idle.push_back(IdleConn {
+            conn,
+            idle_since: Instant::now(),
+        });
     }
 
     /// Close the pool: mark it closed, drain idle connections.
@@ -151,10 +154,14 @@ impl ConnectionPool {
     }
 
     /// Pool configuration.
-    pub fn config(&self) -> &PoolConfig { &self.cfg }
+    pub fn config(&self) -> &PoolConfig {
+        &self.cfg
+    }
 
     /// Internal accessor for health monitor.
-    pub(crate) fn inner(&self) -> &Arc<Mutex<PoolInner>> { &self.inner }
+    pub(crate) fn inner(&self) -> &Arc<Mutex<PoolInner>> {
+        &self.inner
+    }
 
     /// Open a fresh PostgreSQL connection using the pool's config URL.
     async fn open_connection(&self) -> Result<PgConnection> {
@@ -170,19 +177,23 @@ impl ConnectionPool {
 /// Returns `(user, password, "host:port", database)`.
 pub(crate) fn parse_url(url: &str) -> Result<(String, String, String, String)> {
     // Strip scheme
-    let rest = url.strip_prefix("postgres://")
+    let rest = url
+        .strip_prefix("postgres://")
         .or_else(|| url.strip_prefix("postgresql://"))
         .ok_or_else(|| DbError::Other(format!("unsupported URL scheme: {url}")))?;
 
     // Split user:pass@host:port/db
-    let (userinfo, hostpath) = rest.split_once('@')
+    let (userinfo, hostpath) = rest
+        .split_once('@')
         .ok_or_else(|| DbError::Other(format!("missing '@' in database URL: {url}")))?;
 
-    let (user, password) = userinfo.split_once(':')
+    let (user, password) = userinfo
+        .split_once(':')
         .map(|(u, p)| (u.to_string(), p.to_string()))
         .unwrap_or_else(|| (userinfo.to_string(), String::new()));
 
-    let (hostport, database) = hostpath.split_once('/')
+    let (hostport, database) = hostpath
+        .split_once('/')
         .ok_or_else(|| DbError::Other(format!("missing database name in URL: {url}")))?;
 
     Ok((user, password, hostport.to_string(), database.to_string()))
@@ -206,8 +217,7 @@ mod tests {
 
     #[test]
     fn parse_url_postgresql_scheme() {
-        let (user, _, _, db) =
-            parse_url("postgresql://bob:pw@localhost:5432/testdb").unwrap();
+        let (user, _, _, db) = parse_url("postgresql://bob:pw@localhost:5432/testdb").unwrap();
         assert_eq!(user, "bob");
         assert_eq!(db, "testdb");
     }

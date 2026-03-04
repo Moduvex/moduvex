@@ -25,10 +25,11 @@ impl<T: DeserializeOwned + Send + 'static> FromRequest for Json<T> {
         // Validate content-type
         let ct = req.header("content-type").unwrap_or("");
         if !ct.contains("application/json") {
-            return Err(
-                Response::with_body(StatusCode::UNSUPPORTED_MEDIA_TYPE, "expected application/json")
-                    .content_type("text/plain; charset=utf-8"),
-            );
+            return Err(Response::with_body(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "expected application/json",
+            )
+            .content_type("text/plain; charset=utf-8"));
         }
 
         // Take the body (leaves Body::Empty in its place)
@@ -59,11 +60,14 @@ mod tests {
     #[test]
     fn json_extract_success() {
         let mut req = Request::new(Method::POST, "/");
-        req.headers.insert("content-type", b"application/json".to_vec());
+        req.headers
+            .insert("content-type", b"application/json".to_vec());
         req.body = Body::from_bytes(b"{\"name\":\"test\"}".to_vec());
 
         #[derive(serde::Deserialize)]
-        struct Payload { name: String }
+        struct Payload {
+            name: String,
+        }
 
         let Json(p) = Json::<Payload>::from_request(&mut req).unwrap();
         assert_eq!(p.name, "test");
@@ -85,7 +89,8 @@ mod tests {
     #[test]
     fn json_extract_invalid_body() {
         let mut req = Request::new(Method::POST, "/");
-        req.headers.insert("content-type", b"application/json".to_vec());
+        req.headers
+            .insert("content-type", b"application/json".to_vec());
         req.body = Body::from_bytes(b"not json".to_vec());
 
         #[derive(Debug, serde::Deserialize)]
@@ -98,7 +103,9 @@ mod tests {
     #[test]
     fn json_into_response() {
         #[derive(serde::Serialize)]
-        struct Out { ok: bool }
+        struct Out {
+            ok: bool,
+        }
 
         let resp = Json(Out { ok: true }).into_response();
         assert_eq!(resp.status, StatusCode::OK);

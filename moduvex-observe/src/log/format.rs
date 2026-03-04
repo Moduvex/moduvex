@@ -9,7 +9,9 @@ pub struct JsonFormatter;
 impl JsonFormatter {
     pub fn format(event: &Event, w: &mut dyn Write) -> std::io::Result<()> {
         // Manual JSON to avoid serde dependency.
-        write!(w, "{{\"level\":\"{}\",\"ts\":{},\"msg\":\"{}\"",
+        write!(
+            w,
+            "{{\"level\":\"{}\",\"ts\":{},\"msg\":\"{}\"",
             event.level.as_str(),
             event.timestamp_us,
             escape_json(&event.message),
@@ -84,8 +86,7 @@ mod tests {
 
     #[test]
     fn pretty_format_basic() {
-        let event = Event::now(Level::Warn, "slow query")
-            .field("duration_ms", 1500_i64);
+        let event = Event::now(Level::Warn, "slow query").field("duration_ms", 1500_i64);
         let mut buf = Vec::new();
         PrettyFormatter::format(&event, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();

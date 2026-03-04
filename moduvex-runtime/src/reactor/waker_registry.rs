@@ -92,7 +92,7 @@ mod tests {
             // Re-increment refcount.
             let arc = Arc::from_raw(ptr as *const Mutex<usize>);
             let _ = Arc::clone(&arc);
-            Arc::into_raw(arc); // don't drop
+            let _ = Arc::into_raw(arc); // don't drop
             RawWaker::new(ptr, &VTABLE)
         }
         unsafe fn wake(ptr: *const ()) {
@@ -103,7 +103,7 @@ mod tests {
         unsafe fn wake_by_ref(ptr: *const ()) {
             let arc = Arc::from_raw(ptr as *const Mutex<usize>);
             *arc.lock().unwrap() += 1;
-            Arc::into_raw(arc); // keep alive
+            let _ = Arc::into_raw(arc); // keep alive
         }
         unsafe fn drop_waker(ptr: *const ()) {
             drop(Arc::from_raw(ptr as *const Mutex<usize>));

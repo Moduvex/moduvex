@@ -27,9 +27,9 @@ use std::task::{Context, Poll, Waker};
 
 // ── State constants ───────────────────────────────────────────────────────────
 
-pub(crate) const STATE_IDLE: u32      = 0;
+pub(crate) const STATE_IDLE: u32 = 0;
 pub(crate) const STATE_SCHEDULED: u32 = 1;
-pub(crate) const STATE_RUNNING: u32   = 2;
+pub(crate) const STATE_RUNNING: u32 = 2;
 pub(crate) const STATE_COMPLETED: u32 = 3;
 pub(crate) const STATE_CANCELLED: u32 = 4;
 
@@ -48,7 +48,7 @@ impl std::fmt::Display for JoinError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             JoinError::Cancelled => write!(f, "task was cancelled"),
-            JoinError::Panic(_)  => write!(f, "task panicked"),
+            JoinError::Panic(_) => write!(f, "task panicked"),
         }
     }
 }
@@ -60,11 +60,7 @@ impl std::error::Error for JoinError {}
 pub(crate) struct TaskVtable {
     /// Poll the future once. Returns `true` when the future completed (Ready).
     /// On Ready the output has been written to `TaskHeader.output`.
-    pub poll: unsafe fn(
-        body:   *mut (),
-        header: &TaskHeader,
-        cx:     &mut Context<'_>,
-    ) -> bool,
+    pub poll: unsafe fn(body: *mut (), header: &TaskHeader, cx: &mut Context<'_>) -> bool,
 
     /// Free the `Box<TaskBody<F>>` allocation (future only; output lives in header).
     pub drop_body: unsafe fn(body: *mut ()),
@@ -108,7 +104,7 @@ where
     T: Send + 'static,
 {
     &TaskVtable {
-        poll:      body_poll::<F, T>,
+        poll: body_poll::<F, T>,
         drop_body: body_drop::<F>,
     }
 }
@@ -174,20 +170,25 @@ impl Task {
         T: Send + 'static,
     {
         // Allocate and leak the future body (freed via vtable.drop_body).
-        let body: Box<TaskBody<F>> = Box::new(TaskBody { future: Box::pin(future) });
+        let body: Box<TaskBody<F>> = Box::new(TaskBody {
+            future: Box::pin(future),
+        });
         let body_ptr = Box::into_raw(body) as *mut ();
 
         let header = Arc::new(TaskHeader {
-            state:      AtomicU32::new(STATE_SCHEDULED),
-            vtable:     make_vtable::<F, T>(),
+            state: AtomicU32::new(STATE_SCHEDULED),
+            vtable: make_vtable::<F, T>(),
             join_waker: UnsafeCell::new(None),
-            body_ptr:   UnsafeCell::new(body_ptr),
-            output:     UnsafeCell::new(None),
+            body_ptr: UnsafeCell::new(body_ptr),
+            output: UnsafeCell::new(None),
         });
 
         let join_arc = Arc::clone(&header);
         let task = Task { header };
-        let jh   = JoinHandle { header: join_arc, _marker: std::marker::PhantomData };
+        let jh = JoinHandle {
+            header: join_arc,
+            _marker: std::marker::PhantomData,
+        };
         (task, jh)
     }
 
@@ -216,7 +217,9 @@ impl Task {
             // Wake the JoinHandle waiter.
             // SAFETY: state=COMPLETED — no concurrent join_waker writes.
             let waker = unsafe { (*h.join_waker.get()).take() };
-            if let Some(w) = waker { w.wake(); }
+            if let Some(w) = waker {
+                w.wake();
+            }
         } else {
             h.state.store(STATE_IDLE, Ordering::Release);
         }
@@ -242,7 +245,9 @@ impl Task {
         // Wake JoinHandle so it returns JoinError::Cancelled.
         // SAFETY: state=CANCELLED — exclusive join_waker access.
         let waker = unsafe { (*h.join_waker.get()).take() };
-        if let Some(w) = waker { w.wake(); }
+        if let Some(w) = waker {
+            w.wake();
+        }
         // Arc refcount decremented when `self` drops.
     }
 }
@@ -261,11 +266,17 @@ impl<T: Send + 'static> JoinHandle<T> {
     pub fn abort(&self) {
         // Try to flip IDLE → CANCELLED.
         let _ = self.header.state.compare_exchange(
-            STATE_IDLE, STATE_CANCELLED, Ordering::AcqRel, Ordering::Relaxed,
+            STATE_IDLE,
+            STATE_CANCELLED,
+            Ordering::AcqRel,
+            Ordering::Relaxed,
         );
         // Try to flip SCHEDULED → CANCELLED.
         let _ = self.header.state.compare_exchange(
-            STATE_SCHEDULED, STATE_CANCELLED, Ordering::AcqRel, Ordering::Relaxed,
+            STATE_SCHEDULED,
+            STATE_CANCELLED,
+            Ordering::AcqRel,
+            Ordering::Relaxed,
         );
     }
 }
@@ -285,7 +296,7 @@ impl<T: Send + 'static> Future for JoinHandle<T> {
                 match boxed {
                     Some(any_val) => match any_val.downcast::<T>() {
                         Ok(val) => Poll::Ready(Ok(*val)),
-                        Err(_)  => Poll::Ready(Err(JoinError::Cancelled)), // type mismatch (bug)
+                        Err(_) => Poll::Ready(Err(JoinError::Cancelled)), // type mismatch (bug)
                     },
                     None => Poll::Ready(Err(JoinError::Cancelled)), // already taken
                 }
@@ -296,7 +307,9 @@ impl<T: Send + 'static> Future for JoinHandle<T> {
                 // SAFETY: state is IDLE/SCHEDULED/RUNNING (not COMPLETED/CANCELLED).
                 // The executor will write join_waker only after observing COMPLETED/CANCELLED,
                 // which has not happened yet. Single-threaded: no concurrent poll.
-                unsafe { *self.header.join_waker.get() = Some(cx.waker().clone()); }
+                unsafe {
+                    *self.header.join_waker.get() = Some(cx.waker().clone());
+                }
                 Poll::Pending
             }
         }
@@ -319,7 +332,9 @@ mod tests {
     #[test]
     fn join_error_display() {
         assert_eq!(JoinError::Cancelled.to_string(), "task was cancelled");
-        assert!(JoinError::Panic(Box::new("x")).to_string().contains("panicked"));
+        assert!(JoinError::Panic(Box::new("x"))
+            .to_string()
+            .contains("panicked"));
     }
 
     #[test]
@@ -337,7 +352,9 @@ mod tests {
 
         struct Bomb(Arc<AtomicBool>);
         impl Drop for Bomb {
-            fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); }
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
         }
         impl Future for Bomb {
             type Output = ();
@@ -348,6 +365,9 @@ mod tests {
 
         let (task, _jh) = Task::new(Bomb(d));
         task.cancel();
-        assert!(dropped.load(Ordering::SeqCst), "future must be dropped on cancel");
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "future must be dropped on cancel"
+        );
     }
 }

@@ -24,7 +24,10 @@ pub struct Sleep {
 impl Sleep {
     /// Create a `Sleep` that resolves after `duration`.
     pub(crate) fn new(deadline: Instant) -> Self {
-        Self { deadline, timer_id: None }
+        Self {
+            deadline,
+            timer_id: None,
+        }
     }
 }
 
@@ -38,7 +41,9 @@ impl Future for Sleep {
         if now >= self.deadline {
             // Cancel any stale registration (shouldn't normally exist here).
             if let Some(id) = self.timer_id.take() {
-                with_timer_wheel(|w| { w.cancel(id); });
+                with_timer_wheel(|w| {
+                    w.cancel(id);
+                });
             }
             return Poll::Ready(());
         }
@@ -47,7 +52,9 @@ impl Future for Sleep {
         // We always re-register on each poll to keep the waker fresh (the
         // executor may have cloned a new waker since the last poll).
         if let Some(old_id) = self.timer_id.take() {
-            with_timer_wheel(|w| { w.cancel(old_id); });
+            with_timer_wheel(|w| {
+                w.cancel(old_id);
+            });
         }
         let id = with_timer_wheel(|w| w.insert(self.deadline, cx.waker().clone()));
         self.timer_id = Some(id);
@@ -60,7 +67,9 @@ impl Drop for Sleep {
     fn drop(&mut self) {
         // Cancel the timer if the future is dropped before completing.
         if let Some(id) = self.timer_id.take() {
-            with_timer_wheel(|w| { w.cancel(id); });
+            with_timer_wheel(|w| {
+                w.cancel(id);
+            });
         }
     }
 }

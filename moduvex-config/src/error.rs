@@ -1,7 +1,7 @@
 //! Config error types with human-readable messages.
 
-use std::fmt;
 use crate::validate::ValidationError;
+use std::fmt;
 
 /// All possible config errors.
 #[derive(Debug)]
@@ -15,7 +15,10 @@ pub enum ConfigError {
     /// Failed to deserialize a section into the target type.
     Deserialize { section: String, source: String },
     /// Validation rules failed after deserialization.
-    Validation { section: String, errors: Vec<ValidationError> },
+    Validation {
+        section: String,
+        errors: Vec<ValidationError>,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -61,7 +64,9 @@ mod tests {
 
     #[test]
     fn display_missing_section() {
-        let e = ConfigError::MissingSection { section: "db".into() };
+        let e = ConfigError::MissingSection {
+            section: "db".into(),
+        };
         assert_eq!(e.to_string(), "missing config section [db]");
     }
 
@@ -69,9 +74,10 @@ mod tests {
     fn display_validation_errors() {
         let e = ConfigError::Validation {
             section: "server".into(),
-            errors: vec![
-                ValidationError { field: "port".into(), message: "must be > 0".into() },
-            ],
+            errors: vec![ValidationError {
+                field: "port".into(),
+                message: "must be > 0".into(),
+            }],
         };
         let s = e.to_string();
         assert!(s.contains("[server]"));

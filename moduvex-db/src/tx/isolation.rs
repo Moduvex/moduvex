@@ -24,9 +24,9 @@ impl IsolationLevel {
     pub fn as_sql(&self) -> &'static str {
         match self {
             IsolationLevel::ReadUncommitted => "READ UNCOMMITTED",
-            IsolationLevel::ReadCommitted   => "READ COMMITTED",
-            IsolationLevel::RepeatableRead  => "REPEATABLE READ",
-            IsolationLevel::Serializable    => "SERIALIZABLE",
+            IsolationLevel::ReadCommitted => "READ COMMITTED",
+            IsolationLevel::RepeatableRead => "REPEATABLE READ",
+            IsolationLevel::Serializable => "SERIALIZABLE",
         }
     }
 }
@@ -40,9 +40,9 @@ mod tests {
     #[test]
     fn sql_strings() {
         assert_eq!(IsolationLevel::ReadUncommitted.as_sql(), "READ UNCOMMITTED");
-        assert_eq!(IsolationLevel::ReadCommitted.as_sql(),   "READ COMMITTED");
-        assert_eq!(IsolationLevel::RepeatableRead.as_sql(),  "REPEATABLE READ");
-        assert_eq!(IsolationLevel::Serializable.as_sql(),    "SERIALIZABLE");
+        assert_eq!(IsolationLevel::ReadCommitted.as_sql(), "READ COMMITTED");
+        assert_eq!(IsolationLevel::RepeatableRead.as_sql(), "REPEATABLE READ");
+        assert_eq!(IsolationLevel::Serializable.as_sql(), "SERIALIZABLE");
     }
 
     #[test]
@@ -55,7 +55,7 @@ mod tests {
         let a = IsolationLevel::Serializable;
         let b = a; // Copy
         assert_eq!(a, b);
-        let c = a.clone();
+        let c = a;
         assert_eq!(a, c);
     }
 }

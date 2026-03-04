@@ -26,26 +26,33 @@ pub fn parse_pattern(pattern: &str) -> Vec<PathSegment> {
     if stripped.is_empty() {
         return Vec::new();
     }
-    stripped.split('/').map(|seg| {
-        if let Some(name) = seg.strip_prefix(':') {
-            PathSegment::Param(name.to_string())
-        } else if let Some(name) = seg.strip_prefix('*') {
-            PathSegment::Wildcard(name.to_string())
-        } else {
-            PathSegment::Static(seg.to_string())
-        }
-    }).collect()
+    stripped
+        .split('/')
+        .map(|seg| {
+            if let Some(name) = seg.strip_prefix(':') {
+                PathSegment::Param(name.to_string())
+            } else if let Some(name) = seg.strip_prefix('*') {
+                PathSegment::Wildcard(name.to_string())
+            } else {
+                PathSegment::Static(seg.to_string())
+            }
+        })
+        .collect()
 }
 
 /// Match `path` against a slice of `PathSegment`s, filling `params` with
 /// captured `(name, value)` pairs. Returns `true` on full match.
-pub fn match_segments<'a>(
+pub fn match_segments(
     segments: &[PathSegment],
-    path: &'a str,
+    path: &str,
     params: &mut Vec<(&'static str, String)>,
 ) -> bool {
     // We need static name lifetimes for params; use string storage instead.
-    match_segments_owned(segments, path, &mut params.iter().map(|_| ()).collect::<Vec<_>>());
+    match_segments_owned(
+        segments,
+        path,
+        &mut params.iter().map(|_| ()).collect::<Vec<_>>(),
+    );
     // Delegate to the owned version that returns captured pairs.
     false // placeholder — use match_path below
 }
@@ -53,12 +60,13 @@ pub fn match_segments<'a>(
 /// Match a URL path against route segments, returning captured params.
 ///
 /// Returns `Some(Vec<(name, value)>)` on match, `None` on mismatch.
-pub fn match_path<'p>(
-    segments: &'p [PathSegment],
-    url_path: &str,
-) -> Option<Vec<(String, String)>> {
+pub fn match_path(segments: &[PathSegment], url_path: &str) -> Option<Vec<(String, String)>> {
     let path = url_path.trim_start_matches('/');
-    let parts: Vec<&str> = if path.is_empty() { vec![] } else { path.split('/').collect() };
+    let parts: Vec<&str> = if path.is_empty() {
+        vec![]
+    } else {
+        path.split('/').collect()
+    };
 
     let mut params = Vec::new();
     let mut pi = 0; // index into `parts`
@@ -88,7 +96,11 @@ pub fn match_path<'p>(
     }
 
     // All segments consumed — path must be fully consumed too.
-    if pi == parts.len() { Some(params) } else { None }
+    if pi == parts.len() {
+        Some(params)
+    } else {
+        None
+    }
 }
 
 // Unused helper; kept to satisfy the public signature above.
@@ -101,28 +113,37 @@ mod tests {
     #[test]
     fn parse_static() {
         let segs = parse_pattern("/users/profile");
-        assert_eq!(segs, vec![
-            PathSegment::Static("users".into()),
-            PathSegment::Static("profile".into()),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                PathSegment::Static("users".into()),
+                PathSegment::Static("profile".into()),
+            ]
+        );
     }
 
     #[test]
     fn parse_param() {
         let segs = parse_pattern("/users/:id");
-        assert_eq!(segs, vec![
-            PathSegment::Static("users".into()),
-            PathSegment::Param("id".into()),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                PathSegment::Static("users".into()),
+                PathSegment::Param("id".into()),
+            ]
+        );
     }
 
     #[test]
     fn parse_wildcard() {
         let segs = parse_pattern("/files/*path");
-        assert_eq!(segs, vec![
-            PathSegment::Static("files".into()),
-            PathSegment::Wildcard("path".into()),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                PathSegment::Static("files".into()),
+                PathSegment::Wildcard("path".into()),
+            ]
+        );
     }
 
     #[test]

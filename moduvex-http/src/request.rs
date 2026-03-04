@@ -47,7 +47,9 @@ impl std::fmt::Display for HttpVersion {
 pub struct Extensions(HashMap<TypeId, Box<dyn Any + Send + Sync>>);
 
 impl Extensions {
-    pub fn new() -> Self { Self(HashMap::new()) }
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
 
     /// Insert a value, replacing any previous value of the same type.
     pub fn insert<T: Any + Send + Sync>(&mut self, val: T) {
@@ -56,19 +58,22 @@ impl Extensions {
 
     /// Retrieve a shared reference to a value of type `T`.
     pub fn get<T: Any + Send + Sync>(&self) -> Option<&T> {
-        self.0.get(&TypeId::of::<T>())
+        self.0
+            .get(&TypeId::of::<T>())
             .and_then(|b| b.downcast_ref::<T>())
     }
 
     /// Retrieve a mutable reference to a value of type `T`.
     pub fn get_mut<T: Any + Send + Sync>(&mut self) -> Option<&mut T> {
-        self.0.get_mut(&TypeId::of::<T>())
+        self.0
+            .get_mut(&TypeId::of::<T>())
             .and_then(|b| b.downcast_mut::<T>())
     }
 
     /// Remove and return a value of type `T`.
     pub fn remove<T: Any + Send + Sync>(&mut self) -> Option<T> {
-        self.0.remove(&TypeId::of::<T>())
+        self.0
+            .remove(&TypeId::of::<T>())
             .and_then(|b| b.downcast::<T>().ok())
             .map(|b| *b)
     }
@@ -133,8 +138,12 @@ impl Request {
     pub fn is_keep_alive(&self) -> bool {
         if let Some(v) = self.header("connection") {
             let v = v.to_ascii_lowercase();
-            if v.contains("close") { return false; }
-            if v.contains("keep-alive") { return true; }
+            if v.contains("close") {
+                return false;
+            }
+            if v.contains("keep-alive") {
+                return true;
+            }
         }
         self.version == HttpVersion::Http11
     }

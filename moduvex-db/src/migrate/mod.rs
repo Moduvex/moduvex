@@ -9,15 +9,12 @@
 
 pub mod runner;
 
-use std::path::{Path, PathBuf};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use crate::error::{DbError, Result};
 use crate::protocol::postgres::{PgConnection, PgRowSet};
-use runner::{
-    load_migrations, insert_applied_sql,
-    CREATE_TRACKING_TABLE_SQL, SELECT_APPLIED_SQL,
-};
+use runner::{insert_applied_sql, load_migrations, CREATE_TRACKING_TABLE_SQL, SELECT_APPLIED_SQL};
 
 // ── MigrationEngine ───────────────────────────────────────────────────────────
 
@@ -29,7 +26,9 @@ pub struct MigrationEngine {
 impl MigrationEngine {
     /// Create an engine that reads migrations from `migrations_dir`.
     pub fn new(migrations_dir: impl Into<PathBuf>) -> Self {
-        Self { migrations_dir: migrations_dir.into() }
+        Self {
+            migrations_dir: migrations_dir.into(),
+        }
     }
 
     /// Run all pending migrations against `conn`.
@@ -79,7 +78,7 @@ impl MigrationEngine {
         }
 
         Ok(MigrationReport {
-            total:   all.len(),
+            total: all.len(),
             applied: applied_count,
             skipped: skipped_count,
         })
@@ -134,7 +133,11 @@ mod tests {
 
     #[test]
     fn migration_report_display() {
-        let r = MigrationReport { total: 5, applied: 2, skipped: 3 };
+        let r = MigrationReport {
+            total: 5,
+            applied: 2,
+            skipped: 3,
+        };
         let s = r.to_string();
         assert!(s.contains("5 total"));
         assert!(s.contains("2 applied"));

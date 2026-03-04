@@ -36,7 +36,10 @@ impl Interval {
     /// If ticks were missed the future resolves immediately and returns the
     /// deadline of the *missed* tick that is now being reported.
     pub fn tick(&mut self) -> TickFuture<'_> {
-        TickFuture { interval: self, timer_id: None }
+        TickFuture {
+            interval: self,
+            timer_id: None,
+        }
     }
 }
 
@@ -56,7 +59,9 @@ impl<'a> Future for TickFuture<'a> {
         if now >= self.interval.next_deadline {
             // Cancel any pending registration.
             if let Some(id) = self.timer_id.take() {
-                with_timer_wheel(|w| { w.cancel(id); });
+                with_timer_wheel(|w| {
+                    w.cancel(id);
+                });
             }
 
             let fired_at = self.interval.next_deadline;
@@ -65,15 +70,17 @@ impl<'a> Future for TickFuture<'a> {
             let elapsed = now.duration_since(fired_at);
             let extra_ticks = (elapsed.as_nanos() / self.interval.period.as_nanos()) as u64;
             self.interval.missed += extra_ticks;
-            self.interval.next_deadline = fired_at
-                + self.interval.period * (extra_ticks as u32 + 1);
+            self.interval.next_deadline =
+                fired_at + self.interval.period * (extra_ticks as u32 + 1);
 
             return Poll::Ready(fired_at);
         }
 
         // Register (or refresh) the waker with the timer wheel.
         if let Some(old_id) = self.timer_id.take() {
-            with_timer_wheel(|w| { w.cancel(old_id); });
+            with_timer_wheel(|w| {
+                w.cancel(old_id);
+            });
         }
         let deadline = self.interval.next_deadline;
         let id = with_timer_wheel(|w| w.insert(deadline, cx.waker().clone()));
@@ -86,7 +93,9 @@ impl<'a> Future for TickFuture<'a> {
 impl<'a> Drop for TickFuture<'a> {
     fn drop(&mut self) {
         if let Some(id) = self.timer_id.take() {
-            with_timer_wheel(|w| { w.cancel(id); });
+            with_timer_wheel(|w| {
+                w.cancel(id);
+            });
         }
     }
 }

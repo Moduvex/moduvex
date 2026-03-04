@@ -52,7 +52,10 @@ pub struct ConfigError {
 impl ConfigError {
     /// Create a new config error with a message.
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), key: None }
+        Self {
+            message: message.into(),
+            key: None,
+        }
     }
 
     /// Attach the config key that is invalid.
@@ -85,7 +88,10 @@ pub struct LifecycleError {
 
 impl LifecycleError {
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), module: None }
+        Self {
+            message: message.into(),
+            module: None,
+        }
     }
 
     pub fn in_module(mut self, module: &'static str) -> Self {
@@ -120,8 +126,12 @@ mod tests {
     }
     impl std::error::Error for NotFound {}
     impl DomainError for NotFound {
-        fn error_code(&self) -> &str { "resource.not_found" }
-        fn http_status(&self) -> u16 { 404 }
+        fn error_code(&self) -> &str {
+            "resource.not_found"
+        }
+        fn http_status(&self) -> u16 {
+            404
+        }
     }
 
     #[test]

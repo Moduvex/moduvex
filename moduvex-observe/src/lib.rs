@@ -19,23 +19,23 @@
 
 // ── Modules ──
 
-pub mod log;
-pub mod trace;
-pub mod metrics;
-pub mod health;
 pub mod export;
+pub mod health;
+pub mod log;
+pub mod metrics;
+pub mod trace;
 
 // ── Re-exports: Log ──
 
-pub use log::{Event, Level, Value};
-pub use log::subscriber::{set_global_subscriber, Subscriber};
 pub use log::format::{JsonFormatter, PrettyFormatter};
+pub use log::subscriber::{set_global_subscriber, Subscriber};
+pub use log::{Event, Level, Value};
 
 // ── Re-exports: Trace ──
 
-pub use trace::{SpanId, TraceId};
-pub use trace::span::{Span, SpanGuard};
 pub use trace::context::SpanContext;
+pub use trace::span::{Span, SpanGuard};
+pub use trace::{SpanId, TraceId};
 
 // ── Re-exports: Metrics ──
 
@@ -50,17 +50,16 @@ pub use health::{HealthCheck, HealthRegistry, HealthStatus};
 
 // ── Re-exports: Export ──
 
-pub use export::Exporter;
-pub use export::stdout::StdoutExporter;
 pub use export::prometheus::PrometheusExporter;
+pub use export::stdout::StdoutExporter;
+pub use export::Exporter;
 
 // ── Prelude ──
 
 pub mod prelude {
     pub use crate::{
-        Counter, Event, Gauge, HealthCheck, HealthRegistry, HealthStatus,
-        Histogram, Level, MetricsRegistry, Span, SpanContext, SpanGuard,
-        SpanId, Subscriber, TraceId, Value,
+        Counter, Event, Gauge, HealthCheck, HealthRegistry, HealthStatus, Histogram, Level,
+        MetricsRegistry, Span, SpanContext, SpanGuard, SpanId, Subscriber, TraceId, Value,
     };
 }
 

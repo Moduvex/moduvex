@@ -53,15 +53,15 @@ pub fn load_migrations(dir: &Path) -> Result<Vec<Migration>> {
         .map_err(|e| DbError::Migration(format!("cannot read migrations dir: {e}")))?;
 
     for entry in entries {
-        let entry = entry
-            .map_err(|e| DbError::Migration(format!("directory entry error: {e}")))?;
+        let entry = entry.map_err(|e| DbError::Migration(format!("directory entry error: {e}")))?;
         let path: PathBuf = entry.path();
 
         if path.extension().and_then(|s| s.to_str()) != Some("sql") {
             continue;
         }
 
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
@@ -74,7 +74,11 @@ pub fn load_migrations(dir: &Path) -> Result<Vec<Migration>> {
         let sql = std::fs::read_to_string(&path)
             .map_err(|e| DbError::Migration(format!("cannot read {filename}: {e}")))?;
 
-        migrations.push(Migration { version, filename, sql });
+        migrations.push(Migration {
+            version,
+            filename,
+            sql,
+        });
     }
 
     migrations.sort();
@@ -88,7 +92,10 @@ pub fn load_migrations(dir: &Path) -> Result<Vec<Migration>> {
 /// - `20240101_add_index.sql` → `Some(20240101)`
 /// - `no_prefix.sql` → `None`
 pub fn parse_version(filename: &str) -> Option<u64> {
-    let digits: String = filename.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String = filename
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
     if digits.is_empty() {
         return None;
     }
@@ -107,8 +114,7 @@ CREATE TABLE IF NOT EXISTS _moduvex_migrations (
 "#;
 
 /// SQL to fetch all applied migration versions (ordered ascending).
-pub const SELECT_APPLIED_SQL: &str =
-    "SELECT version FROM _moduvex_migrations ORDER BY version ASC";
+pub const SELECT_APPLIED_SQL: &str = "SELECT version FROM _moduvex_migrations ORDER BY version ASC";
 
 /// Build the SQL to record a migration as applied.
 pub fn insert_applied_sql(version: u64, filename: &str) -> String {
@@ -142,10 +148,22 @@ mod tests {
 
     #[test]
     fn migration_ordering() {
-        let mut ms = vec![
-            Migration { version: 3, filename: "003.sql".into(), sql: "".into() },
-            Migration { version: 1, filename: "001.sql".into(), sql: "".into() },
-            Migration { version: 2, filename: "002.sql".into(), sql: "".into() },
+        let mut ms = [
+            Migration {
+                version: 3,
+                filename: "003.sql".into(),
+                sql: "".into(),
+            },
+            Migration {
+                version: 1,
+                filename: "001.sql".into(),
+                sql: "".into(),
+            },
+            Migration {
+                version: 2,
+                filename: "002.sql".into(),
+                sql: "".into(),
+            },
         ];
         ms.sort();
         assert_eq!(ms[0].version, 1);
@@ -157,7 +175,10 @@ mod tests {
     fn load_migrations_from_temp_dir() {
         let dir = tempdir_with_files(&[
             ("001_create_users.sql", "CREATE TABLE users (id SERIAL);"),
-            ("002_add_email.sql", "ALTER TABLE users ADD COLUMN email TEXT;"),
+            (
+                "002_add_email.sql",
+                "ALTER TABLE users ADD COLUMN email TEXT;",
+            ),
             ("readme.txt", "not a migration"),
         ]);
         let migrations = load_migrations(&dir).unwrap();
@@ -193,11 +214,8 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
 
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "moduvex_db_test_{}_{}",
-            std::process::id(),
-            id,
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("moduvex_db_test_{}_{}", std::process::id(), id,));
         // Clean any leftover from previous runs
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();

@@ -7,8 +7,8 @@
 //! Platform dispatch is done entirely at compile time via `cfg` attributes —
 //! zero runtime overhead, no vtable.
 
-use std::io;
 use std::cell::RefCell;
+use std::io;
 
 use crate::platform::sys::{Events, Interest, RawSource};
 
@@ -207,7 +207,9 @@ mod tests {
     fn reactor_register_deregister_roundtrip() {
         let (r, w) = create_pipe().unwrap();
         with_reactor(|reactor| {
-            reactor.register(r, 10, Interest::READABLE).expect("register");
+            reactor
+                .register(r, 10, Interest::READABLE)
+                .expect("register");
             reactor.deregister(r).expect("deregister");
         });
         // SAFETY: fds are valid and owned by this test; deregistered above.

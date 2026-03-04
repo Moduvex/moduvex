@@ -8,13 +8,13 @@
 //! The `TIMER_WHEEL` thread-local holds the wheel for the current executor
 //! thread. `with_timer_wheel` provides safe, borrow-scoped mutable access.
 
-pub mod wheel;
-pub mod sleep;
 pub mod interval;
+pub mod sleep;
+pub mod wheel;
 
-pub(crate) use wheel::{TimerWheel, TimerId};
-pub use sleep::{sleep, sleep_until, Sleep};
 pub use interval::{interval, Interval};
+pub use sleep::{sleep, sleep_until, Sleep};
+pub(crate) use wheel::{TimerId, TimerWheel};
 
 use std::cell::RefCell;
 use std::time::Instant;

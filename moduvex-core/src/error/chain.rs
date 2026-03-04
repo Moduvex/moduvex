@@ -44,16 +44,20 @@ pub trait Context<T> {
 impl<T> Context<T> for Result<T, ModuvexError> {
     fn context(self, msg: &'static str) -> Result<T, ModuvexError> {
         self.map_err(|e| {
-            let boxed: Box<dyn std::error::Error + Send + Sync> =
-                Box::new(ContextError { context: msg.to_string(), source: Box::new(e) });
+            let boxed: Box<dyn std::error::Error + Send + Sync> = Box::new(ContextError {
+                context: msg.to_string(),
+                source: Box::new(e),
+            });
             ModuvexError::Other(boxed)
         })
     }
 
     fn with_context<F: FnOnce() -> String>(self, f: F) -> Result<T, ModuvexError> {
         self.map_err(|e| {
-            let boxed: Box<dyn std::error::Error + Send + Sync> =
-                Box::new(ContextError { context: f(), source: Box::new(e) });
+            let boxed: Box<dyn std::error::Error + Send + Sync> = Box::new(ContextError {
+                context: f(),
+                source: Box::new(e),
+            });
             ModuvexError::Other(boxed)
         })
     }
@@ -64,7 +68,7 @@ impl<T> Context<T> for Result<T, ModuvexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::{ModuvexError, classify::ConfigError};
+    use crate::error::{classify::ConfigError, ModuvexError};
 
     fn failing() -> Result<(), ModuvexError> {
         Err(ModuvexError::Config(ConfigError::new("bad value")))

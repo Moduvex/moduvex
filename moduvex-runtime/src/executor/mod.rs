@@ -12,25 +12,25 @@
 //! The loop runs until the *root* future (the argument to `block_on`) resolves.
 //! Spawned tasks are driven as side-effects of the same loop.
 
+pub mod scheduler;
 pub mod task;
 pub mod task_local;
 pub mod waker;
-pub mod scheduler;
 pub mod work_stealing;
 
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::platform::sys::{create_pipe, events_with_capacity, Interest};
 use crate::reactor::{with_reactor, with_reactor_mut};
-use crate::time::{tick_timer_wheel, next_timer_deadline};
+use crate::time::{next_timer_deadline, tick_timer_wheel};
 
-use task::{JoinHandle, Task, STATE_CANCELLED, STATE_COMPLETED};
 use scheduler::{GlobalQueue, LocalQueue};
+use task::{JoinHandle, Task, STATE_CANCELLED, STATE_COMPLETED};
 use waker::make_waker;
 
 // ── Executor ──────────────────────────────────────────────────────────────────
@@ -108,7 +108,9 @@ impl Executor {
             // ── 4. Drain task queues ──────────────────────────────────────
             let mut did_work = false;
             loop {
-                let Some(header) = self.next_task() else { break };
+                let Some(header) = self.next_task() else {
+                    break;
+                };
                 did_work = true;
                 let key = Arc::as_ptr(&header) as usize;
                 let state = header.state.load(Ordering::Acquire);
@@ -191,7 +193,9 @@ impl Executor {
         loop {
             // SAFETY: `wake_rx` is a valid O_NONBLOCK fd we own.
             let n = unsafe { libc::read(self.wake_rx, buf.as_mut_ptr() as *mut _, buf.len()) };
-            if n <= 0 { break; } // EAGAIN (-1) or EOF (0)
+            if n <= 0 {
+                break;
+            } // EAGAIN (-1) or EOF (0)
         }
     }
 
@@ -213,7 +217,9 @@ impl Executor {
             // SAFETY: fd is the write end of a non-blocking pipe we own.
             libc::write(fd, &b as *const u8 as *const _, 1);
         }
-        unsafe fn wake_root_by_ref(ptr: *const ()) { wake_root(ptr); }
+        unsafe fn wake_root_by_ref(ptr: *const ()) {
+            wake_root(ptr);
+        }
         unsafe fn drop_root(_: *const ()) {} // no heap allocation to free
 
         static ROOT_VTABLE: RawWakerVTable =
@@ -246,7 +252,7 @@ const WAKE_TOKEN: usize = usize::MAX;
 thread_local! {
     /// Raw pointer to the current thread's `Executor`.
     /// Non-null only inside a `block_on_with_spawn` call.
-    static CURRENT_EXECUTOR: Cell<*mut Executor> = Cell::new(std::ptr::null_mut());
+    static CURRENT_EXECUTOR: Cell<*mut Executor> = const { Cell::new(std::ptr::null_mut()) };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -283,7 +289,10 @@ where
 {
     CURRENT_EXECUTOR.with(|cell| {
         let ptr = cell.get();
-        assert!(!ptr.is_null(), "spawn() called outside of block_on_with_spawn context");
+        assert!(
+            !ptr.is_null(),
+            "spawn() called outside of block_on_with_spawn context"
+        );
         // SAFETY: ptr is valid for the duration of `block_on_with_spawn`, which
         // runs the entire async tree (including this call) on the same thread.
         unsafe { (*ptr).spawn(future) }
@@ -304,8 +313,12 @@ mod tests {
 
     #[test]
     fn block_on_chain_of_awaits() {
-        async fn double(x: u32) -> u32 { x * 2 }
-        async fn compute() -> u32 { double(double(3).await).await }
+        async fn double(x: u32) -> u32 {
+            x * 2
+        }
+        async fn compute() -> u32 {
+            double(double(3).await).await
+        }
         assert_eq!(block_on(compute()), 12);
     }
 
@@ -329,8 +342,12 @@ mod tests {
         let c1 = counter.clone();
         let c2 = counter.clone();
         block_on_with_spawn(async move {
-            let jh1 = spawn(async move { c1.fetch_add(1, Ord::SeqCst); });
-            let jh2 = spawn(async move { c2.fetch_add(1, Ord::SeqCst); });
+            let jh1 = spawn(async move {
+                c1.fetch_add(1, Ord::SeqCst);
+            });
+            let jh2 = spawn(async move {
+                c2.fetch_add(1, Ord::SeqCst);
+            });
             jh1.await.unwrap();
             jh2.await.unwrap();
         });
@@ -343,9 +360,7 @@ mod tests {
         use std::task::Poll as P;
 
         let result = block_on_with_spawn(async {
-            let jh = spawn(async {
-                poll_fn(|_| P::<()>::Pending).await
-            });
+            let jh = spawn(async { poll_fn(|_| P::<()>::Pending).await });
             jh.abort();
             jh.await
         });
@@ -359,8 +374,12 @@ mod tests {
         let o1 = order.clone();
         let o2 = order.clone();
         block_on_with_spawn(async move {
-            let jh1 = spawn(async move { o1.lock().unwrap().push(1); });
-            let jh2 = spawn(async move { o2.lock().unwrap().push(2); });
+            let jh1 = spawn(async move {
+                o1.lock().unwrap().push(1);
+            });
+            let jh2 = spawn(async move {
+                o2.lock().unwrap().push(2);
+            });
             jh1.await.unwrap();
             jh2.await.unwrap();
         });

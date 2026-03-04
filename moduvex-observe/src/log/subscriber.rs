@@ -33,6 +33,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    #[allow(dead_code)]
     struct CountingSub(Arc<AtomicUsize>);
 
     impl Subscriber for CountingSub {

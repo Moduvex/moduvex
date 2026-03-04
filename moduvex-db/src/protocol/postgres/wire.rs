@@ -27,7 +27,9 @@ pub async fn read_exact<R: AsyncRead + Unpin>(reader: &mut R, n: usize) -> Resul
     while filled < n {
         let chunk = poll_fn(|cx| Pin::new(&mut *reader).poll_read(cx, &mut buf[filled..])).await?;
         if chunk == 0 {
-            return Err(DbError::Protocol("unexpected EOF reading from server".into()));
+            return Err(DbError::Protocol(
+                "unexpected EOF reading from server".into(),
+            ));
         }
         filled += chunk;
     }
@@ -37,9 +39,7 @@ pub async fn read_exact<R: AsyncRead + Unpin>(reader: &mut R, n: usize) -> Resul
 /// Read one backend message frame: returns `(type_byte, payload)`.
 ///
 /// Format: `[type: u8][length: i32 BE][payload: length-4 bytes]`
-pub async fn read_backend_message<R: AsyncRead + Unpin>(
-    reader: &mut R,
-) -> Result<(u8, Vec<u8>)> {
+pub async fn read_backend_message<R: AsyncRead + Unpin>(reader: &mut R) -> Result<(u8, Vec<u8>)> {
     // 1-byte message type
     let hdr = read_exact(reader, 5).await?;
     let msg_type = hdr[0];
@@ -116,7 +116,9 @@ pub fn read_cstring(bytes: &[u8], offset: usize) -> Result<(String, usize)> {
         pos += 1;
     }
     if pos >= bytes.len() {
-        return Err(DbError::Protocol("unterminated C-string in message payload".into()));
+        return Err(DbError::Protocol(
+            "unterminated C-string in message payload".into(),
+        ));
     }
     let s = String::from_utf8(bytes[start..pos].to_vec())
         .map_err(|_| DbError::Protocol("non-UTF-8 C-string in payload".into()))?;

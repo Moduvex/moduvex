@@ -59,31 +59,49 @@ impl std::fmt::Display for Value {
 // ── Into<Value> conversions ──
 
 impl From<&str> for Value {
-    fn from(s: &str) -> Self { Self::String(s.to_owned()) }
+    fn from(s: &str) -> Self {
+        Self::String(s.to_owned())
+    }
 }
 impl From<String> for Value {
-    fn from(s: String) -> Self { Self::String(s) }
+    fn from(s: String) -> Self {
+        Self::String(s)
+    }
 }
 impl From<i32> for Value {
-    fn from(n: i32) -> Self { Self::I64(n as i64) }
+    fn from(n: i32) -> Self {
+        Self::I64(n as i64)
+    }
 }
 impl From<i64> for Value {
-    fn from(n: i64) -> Self { Self::I64(n) }
+    fn from(n: i64) -> Self {
+        Self::I64(n)
+    }
 }
 impl From<u32> for Value {
-    fn from(n: u32) -> Self { Self::U64(n as u64) }
+    fn from(n: u32) -> Self {
+        Self::U64(n as u64)
+    }
 }
 impl From<u64> for Value {
-    fn from(n: u64) -> Self { Self::U64(n) }
+    fn from(n: u64) -> Self {
+        Self::U64(n)
+    }
 }
 impl From<f64> for Value {
-    fn from(n: f64) -> Self { Self::F64(n) }
+    fn from(n: f64) -> Self {
+        Self::F64(n)
+    }
 }
 impl From<bool> for Value {
-    fn from(b: bool) -> Self { Self::Bool(b) }
+    fn from(b: bool) -> Self {
+        Self::Bool(b)
+    }
 }
 impl From<usize> for Value {
-    fn from(n: usize) -> Self { Self::U64(n as u64) }
+    fn from(n: usize) -> Self {
+        Self::U64(n as u64)
+    }
 }
 
 /// A structured log event with level, message, timestamp, and key-value fields.

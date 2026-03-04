@@ -12,14 +12,11 @@ use std::io;
 use std::os::unix::io::RawFd;
 
 use libc::{
-    kevent, kqueue,
-    timespec,
-    EV_ADD, EV_CLEAR, EV_DELETE, EV_ERROR,
-    EVFILT_READ, EVFILT_WRITE,
+    kevent, kqueue, timespec, EVFILT_READ, EVFILT_WRITE, EV_ADD, EV_CLEAR, EV_DELETE, EV_ERROR,
 };
 
-use crate::platform::sys::{Event, Events, Interest, RawSource};
 use super::ReactorBackend;
+use crate::platform::sys::{Event, Events, Interest, RawSource};
 
 /// Maximum events collected per `poll` call.
 const MAX_EVENTS: usize = 1024;
@@ -57,7 +54,7 @@ impl KqueueReactor {
                 changes.len() as i32,
                 std::ptr::null_mut(), // no output events
                 0,
-                std::ptr::null(),     // no timeout → non-blocking change submission
+                std::ptr::null(), // no timeout → non-blocking change submission
             )
         };
         if rc == -1 {
@@ -73,12 +70,12 @@ impl KqueueReactor {
     #[inline]
     fn make_add_event(source: RawSource, filter: i16, token: usize) -> libc::kevent {
         libc::kevent {
-            ident:  source as libc::uintptr_t,
+            ident: source as libc::uintptr_t,
             filter,
-            flags:  (EV_ADD | EV_CLEAR) as u16,
+            flags: (EV_ADD | EV_CLEAR),
             fflags: 0,
-            data:   0,
-            udata:  token as *mut libc::c_void,
+            data: 0,
+            udata: token as *mut libc::c_void,
         }
     }
 
@@ -86,12 +83,12 @@ impl KqueueReactor {
     #[inline]
     fn make_del_event(source: RawSource, filter: i16) -> libc::kevent {
         libc::kevent {
-            ident:  source as libc::uintptr_t,
+            ident: source as libc::uintptr_t,
             filter,
-            flags:  EV_DELETE as u16,
+            flags: EV_DELETE,
             fflags: 0,
-            data:   0,
-            udata:  std::ptr::null_mut(),
+            data: 0,
+            udata: std::ptr::null_mut(),
         }
     }
 }
@@ -144,7 +141,7 @@ impl ReactorBackend for KqueueReactor {
         }
         // Check per-entry errors — ENOENT is acceptable (filter not registered).
         for entry in &out[..rc as usize] {
-            if entry.flags & EV_ERROR as u16 != 0 && entry.data != libc::ENOENT as isize {
+            if entry.flags & EV_ERROR != 0 && entry.data != libc::ENOENT as isize {
                 return Err(io::Error::from_raw_os_error(entry.data as i32));
             }
         }
@@ -159,7 +156,7 @@ impl ReactorBackend for KqueueReactor {
         let ts_ptr = match timeout_ms {
             Some(ms) => {
                 ts_storage = timespec {
-                    tv_sec:  (ms / 1000) as libc::time_t,
+                    tv_sec: (ms / 1000) as libc::time_t,
                     tv_nsec: ((ms % 1000) * 1_000_000) as libc::c_long,
                 };
                 &ts_storage as *const timespec
@@ -173,7 +170,7 @@ impl ReactorBackend for KqueueReactor {
         let n = unsafe {
             kevent(
                 self.kq_fd,
-                std::ptr::null(),     // no changes to submit
+                std::ptr::null(), // no changes to submit
                 0,
                 raw.as_mut_ptr(),
                 cap as i32,
@@ -195,7 +192,7 @@ impl ReactorBackend for KqueueReactor {
         events.reserve(n);
         for kev in &raw {
             // Skip entries that carry error flags.
-            if kev.flags & EV_ERROR as u16 != 0 {
+            if kev.flags & EV_ERROR != 0 {
                 continue;
             }
             let token = kev.udata as usize;
@@ -231,7 +228,9 @@ mod tests {
     fn register_and_deregister_pipe_read_end() {
         let reactor = KqueueReactor::new().unwrap();
         let (r, w) = create_pipe().unwrap();
-        reactor.register(r, 1, Interest::READABLE).expect("register failed");
+        reactor
+            .register(r, 1, Interest::READABLE)
+            .expect("register failed");
         reactor.deregister(r).expect("deregister failed");
         unsafe { libc::close(r) };
         unsafe { libc::close(w) };
@@ -251,7 +250,10 @@ mod tests {
         let mut events = events_with_capacity(16);
         let n = reactor.poll(&mut events, Some(200)).expect("poll failed");
         assert!(n >= 1);
-        let ev = events.iter().find(|e| e.token == 77).expect("token 77 not found");
+        let ev = events
+            .iter()
+            .find(|e| e.token == 77)
+            .expect("token 77 not found");
         assert!(ev.readable);
 
         unsafe { libc::close(r) };

@@ -12,9 +12,9 @@ use crate::status::StatusCode;
 
 /// An HTTP response ready to be serialised and sent over the wire.
 pub struct Response {
-    pub status:  StatusCode,
+    pub status: StatusCode,
     pub headers: HeaderMap,
-    pub body:    Body,
+    pub body: Body,
 }
 
 impl Response {
@@ -55,8 +55,7 @@ impl Response {
 
     /// Shorthand: JSON 200 response (body must already be serialised JSON bytes).
     pub fn json(body: impl Into<Vec<u8>>) -> Self {
-        Self::with_body(StatusCode::OK, body.into())
-            .content_type("application/json")
+        Self::with_body(StatusCode::OK, body.into()).content_type("application/json")
     }
 
     /// Shorthand: 404 Not Found with plain-text body.
@@ -67,8 +66,11 @@ impl Response {
 
     /// Shorthand: 500 Internal Server Error.
     pub fn internal_error() -> Self {
-        Self::with_body(StatusCode::INTERNAL_SERVER_ERROR, "500 Internal Server Error")
-            .content_type("text/plain; charset=utf-8")
+        Self::with_body(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "500 Internal Server Error",
+        )
+        .content_type("text/plain; charset=utf-8")
     }
 }
 
@@ -92,25 +94,32 @@ pub trait IntoResponse {
 }
 
 impl IntoResponse for Response {
-    fn into_response(self) -> Response { self }
+    fn into_response(self) -> Response {
+        self
+    }
 }
 
 impl IntoResponse for StatusCode {
-    fn into_response(self) -> Response { Response::new(self) }
+    fn into_response(self) -> Response {
+        Response::new(self)
+    }
 }
 
 impl IntoResponse for &'static str {
-    fn into_response(self) -> Response { Response::text(self) }
+    fn into_response(self) -> Response {
+        Response::text(self)
+    }
 }
 
 impl IntoResponse for String {
-    fn into_response(self) -> Response { Response::text(self) }
+    fn into_response(self) -> Response {
+        Response::text(self)
+    }
 }
 
 impl IntoResponse for Vec<u8> {
     fn into_response(self) -> Response {
-        Response::with_body(StatusCode::OK, self)
-            .content_type("application/octet-stream")
+        Response::with_body(StatusCode::OK, self).content_type("application/octet-stream")
     }
 }
 
@@ -121,7 +130,6 @@ impl<B: Into<Body>> IntoResponse for (StatusCode, B) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,7 +138,10 @@ mod tests {
     fn text_response() {
         let r = Response::text("hello");
         assert_eq!(r.status, StatusCode::OK);
-        assert_eq!(r.headers.get_str("content-type"), Some("text/plain; charset=utf-8"));
+        assert_eq!(
+            r.headers.get_str("content-type"),
+            Some("text/plain; charset=utf-8")
+        );
         assert_eq!(r.body.into_bytes(), b"hello");
     }
 

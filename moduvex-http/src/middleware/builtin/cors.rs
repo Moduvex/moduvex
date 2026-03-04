@@ -25,11 +25,14 @@ impl Cors {
     pub fn permissive() -> Self {
         Self {
             allow_origins: vec!["*".into()],
-            allow_methods: vec![
-                "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD",
-            ].into_iter().map(Into::into).collect(),
+            allow_methods: vec!["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             allow_headers: vec!["Content-Type", "Authorization", "Accept"]
-                .into_iter().map(Into::into).collect(),
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             max_age: 86400,
         }
     }

@@ -36,7 +36,7 @@ impl std::fmt::Display for ChunkedError {
 /// `buf` must contain the full chunked body (including the `0\r\n\r\n`
 /// terminator). Returns the assembled plaintext bytes on success.
 pub fn decode_chunked(buf: &[u8]) -> Result<Vec<u8>, ChunkedError> {
-    let mut pos  = 0;
+    let mut pos = 0;
     let mut body = Vec::new();
 
     loop {
@@ -48,8 +48,8 @@ pub fn decode_chunked(buf: &[u8]) -> Result<Vec<u8>, ChunkedError> {
         let size_str = std::str::from_utf8(size_str)
             .map_err(|_| ChunkedError::BadChunkSize)?
             .trim();
-        let chunk_size = usize::from_str_radix(size_str, 16)
-            .map_err(|_| ChunkedError::BadChunkSize)?;
+        let chunk_size =
+            usize::from_str_radix(size_str, 16).map_err(|_| ChunkedError::BadChunkSize)?;
         pos += crlf + 2; // skip size line + CRLF
 
         if chunk_size == 0 {
@@ -83,7 +83,9 @@ pub fn decode_chunked(buf: &[u8]) -> Result<Vec<u8>, ChunkedError> {
 ///
 /// Appends `<hex-size>\r\n<data>\r\n`. Call `write_final_chunk(out)` when done.
 pub fn encode_chunk(data: &[u8], out: &mut Vec<u8>) {
-    if data.is_empty() { return; }
+    if data.is_empty() {
+        return;
+    }
     let hex = format!("{:x}", data.len());
     out.extend_from_slice(hex.as_bytes());
     out.extend_from_slice(b"\r\n");

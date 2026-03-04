@@ -53,11 +53,7 @@ impl HookRegistry {
     /// Notify all registered hooks that `phase` has been entered.
     ///
     /// Returns the first error encountered; remaining hooks are not called.
-    pub async fn notify_phase_entered(
-        &self,
-        phase: Phase,
-        ctx: &AppContext,
-    ) -> Result<()> {
+    pub async fn notify_phase_entered(&self, phase: Phase, ctx: &AppContext) -> Result<()> {
         for hook in &self.hooks {
             hook.on_phase_entered(phase, ctx).await?;
         }
@@ -104,12 +100,20 @@ mod tests {
     fn hook_receives_phase_notifications() {
         let log = Arc::new(Mutex::new(Vec::new()));
         let mut registry = HookRegistry::new();
-        registry.register(TrackingHook { phases: Arc::clone(&log) });
+        registry.register(TrackingHook {
+            phases: Arc::clone(&log),
+        });
 
         let ctx = AppContext::new();
         moduvex_runtime::block_on(async {
-            registry.notify_phase_entered(Phase::Config, &ctx).await.unwrap();
-            registry.notify_phase_entered(Phase::Init, &ctx).await.unwrap();
+            registry
+                .notify_phase_entered(Phase::Config, &ctx)
+                .await
+                .unwrap();
+            registry
+                .notify_phase_entered(Phase::Init, &ctx)
+                .await
+                .unwrap();
         });
 
         let recorded = log.lock().unwrap().clone();
@@ -121,13 +125,16 @@ mod tests {
         let registry = HookRegistry::new();
         let ctx = AppContext::new();
         moduvex_runtime::block_on(async {
-            registry.notify_phase_entered(Phase::Ready, &ctx).await.unwrap();
+            registry
+                .notify_phase_entered(Phase::Ready, &ctx)
+                .await
+                .unwrap();
         });
     }
 
     #[test]
     fn hook_error_aborts_remaining() {
-        use crate::error::{ModuvexError, classify::LifecycleError};
+        use crate::error::{classify::LifecycleError, ModuvexError};
 
         struct FailHook;
         impl LifecycleHook for FailHook {
@@ -136,9 +143,7 @@ mod tests {
                 _phase: Phase,
                 _ctx: &'a AppContext,
             ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-                Box::pin(async {
-                    Err(ModuvexError::Lifecycle(LifecycleError::new("hook failed")))
-                })
+                Box::pin(async { Err(ModuvexError::Lifecycle(LifecycleError::new("hook failed"))) })
             }
         }
 
@@ -168,6 +173,9 @@ mod tests {
             assert!(result.is_err());
         });
 
-        assert!(!*called.lock().unwrap(), "second hook should not have been called");
+        assert!(
+            !*called.lock().unwrap(),
+            "second hook should not have been called"
+        );
     }
 }

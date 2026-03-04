@@ -37,20 +37,13 @@ impl FromMeta for DependsList {
                     let path = match meta {
                         syn::Meta::Path(p) => p.clone(),
                         other => {
-                            return Err(
-                                darling::Error::unexpected_type("path").with_span(other),
-                            );
+                            return Err(darling::Error::unexpected_type("path").with_span(other));
                         }
                     };
-                    types.push(Type::Path(syn::TypePath {
-                        qself: None,
-                        path,
-                    }));
+                    types.push(Type::Path(syn::TypePath { qself: None, path }));
                 }
                 darling::ast::NestedMeta::Lit(lit) => {
-                    return Err(
-                        darling::Error::unexpected_lit_type(lit),
-                    );
+                    return Err(darling::Error::unexpected_lit_type(lit));
                 }
             }
         }
@@ -67,10 +60,7 @@ pub fn expand(input: TokenStream) -> darling::Result<TokenStream> {
     let priority = opts.priority.unwrap_or(0);
     let core = utils::core_path();
 
-    let deps: Vec<Type> = opts
-        .depends_on
-        .map(|d| d.0)
-        .unwrap_or_default();
+    let deps: Vec<Type> = opts.depends_on.map(|d| d.0).unwrap_or_default();
     let required_type = utils::build_nested_tuple(&deps);
 
     let module_impl = quote! {

@@ -39,12 +39,16 @@ mod tests {
     use crate::routing::method::Method;
 
     #[derive(Clone, Debug)]
-    struct AppState { db_url: String }
+    struct AppState {
+        db_url: String,
+    }
 
     #[test]
     fn state_extract_present() {
         let mut req = Request::new(Method::GET, "/");
-        req.extensions.insert(AppState { db_url: "pg://localhost".into() });
+        req.extensions.insert(AppState {
+            db_url: "pg://localhost".into(),
+        });
         let State(s) = State::<AppState>::from_request(&mut req).unwrap();
         assert_eq!(s.db_url, "pg://localhost");
     }

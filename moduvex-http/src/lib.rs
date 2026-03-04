@@ -21,29 +21,29 @@
 
 // ── Modules ───────────────────────────────────────────────────────────────────
 
-pub mod status;
-pub mod header;
 pub mod body;
-pub mod routing;
+pub mod extract;
+pub mod header;
+pub mod middleware;
+pub mod protocol;
 pub mod request;
 pub mod response;
-pub mod protocol;
+pub mod routing;
 pub mod server;
-pub mod extract;
-pub mod middleware;
+pub mod status;
 
 // ── Top-level re-exports ──────────────────────────────────────────────────────
 
-pub use status::StatusCode;
+pub use body::{Body, BodyReceiver, BodySender};
+pub use extract::{FromRequest, IntoHandler, Json, Path, Query, State};
 pub use header::HeaderMap;
-pub use body::{Body, BodySender, BodyReceiver};
-pub use request::{Request, HttpVersion, Extensions};
-pub use response::{Response, IntoResponse};
+pub use middleware::Middleware;
+pub use request::{Extensions, HttpVersion, Request};
+pub use response::{IntoResponse, Response};
 pub use routing::method::Method;
 pub use routing::router::Router;
 pub use server::HttpServer;
-pub use extract::{FromRequest, IntoHandler, Json, Path, Query, State};
-pub use middleware::Middleware;
+pub use status::StatusCode;
 
 // ── Prelude ───────────────────────────────────────────────────────────────────
 
@@ -54,10 +54,8 @@ pub use middleware::Middleware;
 /// ```
 pub mod prelude {
     pub use crate::{
-        Body, Extensions, HeaderMap, HttpVersion,
-        IntoResponse, Method, Request, Response,
-        Router, StatusCode, HttpServer,
-        FromRequest, IntoHandler, Json, Path, Query, State,
-        Middleware,
+        Body, Extensions, FromRequest, HeaderMap, HttpServer, HttpVersion, IntoHandler,
+        IntoResponse, Json, Method, Middleware, Path, Query, Request, Response, Router, State,
+        StatusCode,
     };
 }

@@ -10,13 +10,10 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{ItemMod, Visibility, Item};
+use syn::{Item, ItemMod, Visibility};
 
 /// Expand `#[moduvex::module]` on a `mod` block.
-pub fn expand(
-    _args: TokenStream,
-    item: TokenStream,
-) -> syn::Result<TokenStream> {
+pub fn expand(_args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let mut module: ItemMod = syn::parse2(item)?;
 
     // Ensure this is an inline mod (has braces with content)

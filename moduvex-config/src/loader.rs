@@ -2,19 +2,15 @@
 //!
 //! Reads `{name}.toml` as base, then merges `{name}-{profile}.toml` on top.
 
-use std::path::{Path, PathBuf};
 use crate::error::ConfigError;
 use crate::profile::Profile;
+use std::path::{Path, PathBuf};
 
 /// Load and merge TOML files for the given config name and profile.
 ///
 /// Resolution: `{dir}/{name}.toml` (base) + `{dir}/{name}-{profile}.toml` (overlay).
 /// Returns merged `toml::Value::Table`.
-pub fn load_toml(
-    dir: &Path,
-    name: &str,
-    profile: &Profile,
-) -> Result<toml::Value, ConfigError> {
+pub fn load_toml(dir: &Path, name: &str, profile: &Profile) -> Result<toml::Value, ConfigError> {
     let base_path = dir.join(format!("{}.toml", name));
     let profile_path = dir.join(format!("{}-{}.toml", name, profile.as_str()));
 
@@ -93,10 +89,14 @@ mod tests {
     mod tempdir {
         pub struct TempDir(pub std::path::PathBuf);
         impl TempDir {
-            pub fn path(&self) -> &std::path::Path { &self.0 }
+            pub fn path(&self) -> &std::path::Path {
+                &self.0
+            }
         }
         impl Drop for TempDir {
-            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
         }
     }
 
@@ -138,6 +138,6 @@ mod tests {
         let db = merged["db"].as_table().unwrap();
         assert_eq!(db["host"].as_str().unwrap(), "localhost");
         assert_eq!(db["pool"].as_integer().unwrap(), 20);
-        assert_eq!(db["ssl"].as_bool().unwrap(), true);
+        assert!(db["ssl"].as_bool().unwrap());
     }
 }

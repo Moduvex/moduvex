@@ -21,7 +21,9 @@ pub struct TypeMap {
 impl TypeMap {
     /// Create an empty `TypeMap`.
     pub fn new() -> Self {
-        Self { inner: RwLock::new(HashMap::new()) }
+        Self {
+            inner: RwLock::new(HashMap::new()),
+        }
     }
 
     /// Insert a value of type `T`, automatically wrapping it in `Arc<T>`.
@@ -64,7 +66,9 @@ impl TypeMap {
 }
 
 impl Default for TypeMap {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // TypeMap is Send + Sync because RwLock<HashMap<...>> is Send + Sync
@@ -130,6 +134,8 @@ mod tests {
                 })
             })
             .collect();
-        for h in handles { h.join().unwrap(); }
+        for h in handles {
+            h.join().unwrap();
+        }
     }
 }

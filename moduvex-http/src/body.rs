@@ -5,15 +5,16 @@
 //! - `Fixed`  — fully buffered bytes (small JSON payloads, form data)
 //! - `Stream` — channel-backed iterator for large or streamed bodies
 
-use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 // ── Body ──────────────────────────────────────────────────────────────────────
 
 /// HTTP body — owned bytes or a streaming channel.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum Body {
     /// No body content.
+    #[default]
     Empty,
     /// Fully buffered body — all bytes in memory.
     Fixed(Vec<u8>),
@@ -23,12 +24,18 @@ pub enum Body {
 
 impl Body {
     /// Construct an empty body.
-    pub fn empty() -> Self { Self::Empty }
+    pub fn empty() -> Self {
+        Self::Empty
+    }
 
     /// Construct from a byte slice, copying the data.
     pub fn from_bytes(bytes: impl Into<Vec<u8>>) -> Self {
         let v = bytes.into();
-        if v.is_empty() { Self::Empty } else { Self::Fixed(v) }
+        if v.is_empty() {
+            Self::Empty
+        } else {
+            Self::Fixed(v)
+        }
     }
 
     /// Construct from a UTF-8 string.
@@ -42,7 +49,9 @@ impl Body {
             chunks: VecDeque::new(),
             closed: false,
         }));
-        let receiver = BodyReceiver { inner: inner.clone() };
+        let receiver = BodyReceiver {
+            inner: inner.clone(),
+        };
         let sender = BodySender { inner };
         (Self::Stream(receiver), sender)
     }
@@ -78,24 +87,28 @@ impl Body {
     }
 }
 
-impl Default for Body {
-    fn default() -> Self { Self::Empty }
-}
-
 impl From<Vec<u8>> for Body {
-    fn from(v: Vec<u8>) -> Self { Self::from_bytes(v) }
+    fn from(v: Vec<u8>) -> Self {
+        Self::from_bytes(v)
+    }
 }
 
 impl From<&[u8]> for Body {
-    fn from(s: &[u8]) -> Self { Self::from_bytes(s.to_vec()) }
+    fn from(s: &[u8]) -> Self {
+        Self::from_bytes(s.to_vec())
+    }
 }
 
 impl From<String> for Body {
-    fn from(s: String) -> Self { Self::from_text(s) }
+    fn from(s: String) -> Self {
+        Self::from_text(s)
+    }
 }
 
 impl From<&str> for Body {
-    fn from(s: &str) -> Self { Self::from_text(s) }
+    fn from(s: &str) -> Self {
+        Self::from_text(s)
+    }
 }
 
 // ── Streaming channel internals ───────────────────────────────────────────────

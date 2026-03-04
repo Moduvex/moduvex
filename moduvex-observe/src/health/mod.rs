@@ -103,13 +103,19 @@ mod tests {
 
     struct AlwaysHealthy;
     impl HealthCheck for AlwaysHealthy {
-        fn name(&self) -> &str { "always_healthy" }
-        fn check(&self) -> HealthStatus { HealthStatus::Healthy }
+        fn name(&self) -> &str {
+            "always_healthy"
+        }
+        fn check(&self) -> HealthStatus {
+            HealthStatus::Healthy
+        }
     }
 
     struct AlwaysUnhealthy;
     impl HealthCheck for AlwaysUnhealthy {
-        fn name(&self) -> &str { "always_unhealthy" }
+        fn name(&self) -> &str {
+            "always_unhealthy"
+        }
         fn check(&self) -> HealthStatus {
             HealthStatus::Unhealthy("down".into())
         }
@@ -117,7 +123,9 @@ mod tests {
 
     struct DegradedCheck;
     impl HealthCheck for DegradedCheck {
-        fn name(&self) -> &str { "degraded" }
+        fn name(&self) -> &str {
+            "degraded"
+        }
         fn check(&self) -> HealthStatus {
             HealthStatus::Degraded("slow".into())
         }

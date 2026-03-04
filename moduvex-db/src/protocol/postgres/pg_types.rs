@@ -13,13 +13,13 @@ use crate::error::{DbError, Result};
 
 // ── OID constants ─────────────────────────────────────────────────────────────
 
-pub const OID_BOOL:      u32 = 16;
-pub const OID_INT4:      u32 = 23;
-pub const OID_INT8:      u32 = 20;
-pub const OID_FLOAT8:    u32 = 701;
-pub const OID_TEXT:      u32 = 25;
+pub const OID_BOOL: u32 = 16;
+pub const OID_INT4: u32 = 23;
+pub const OID_INT8: u32 = 20;
+pub const OID_FLOAT8: u32 = 701;
+pub const OID_TEXT: u32 = 25;
 pub const OID_TIMESTAMP: u32 = 1114;
-pub const OID_UUID:      u32 = 2950;
+pub const OID_UUID: u32 = 2950;
 
 // ── PgType ────────────────────────────────────────────────────────────────────
 
@@ -41,27 +41,27 @@ impl PgType {
     /// Resolve an OID to a `PgType`.
     pub fn from_oid(oid: u32) -> Self {
         match oid {
-            OID_BOOL      => PgType::Bool,
-            OID_INT4      => PgType::Int4,
-            OID_INT8      => PgType::Int8,
-            OID_FLOAT8    => PgType::Float8,
-            OID_TEXT      => PgType::Text,
+            OID_BOOL => PgType::Bool,
+            OID_INT4 => PgType::Int4,
+            OID_INT8 => PgType::Int8,
+            OID_FLOAT8 => PgType::Float8,
+            OID_TEXT => PgType::Text,
             OID_TIMESTAMP => PgType::Timestamp,
-            OID_UUID      => PgType::Uuid,
-            other         => PgType::Unknown(other),
+            OID_UUID => PgType::Uuid,
+            other => PgType::Unknown(other),
         }
     }
 
     /// Return the OID for this type.
     pub fn oid(self) -> u32 {
         match self {
-            PgType::Bool         => OID_BOOL,
-            PgType::Int4         => OID_INT4,
-            PgType::Int8         => OID_INT8,
-            PgType::Float8       => OID_FLOAT8,
-            PgType::Text         => OID_TEXT,
-            PgType::Timestamp    => OID_TIMESTAMP,
-            PgType::Uuid         => OID_UUID,
+            PgType::Bool => OID_BOOL,
+            PgType::Int4 => OID_INT4,
+            PgType::Int8 => OID_INT8,
+            PgType::Float8 => OID_FLOAT8,
+            PgType::Text => OID_TEXT,
+            PgType::Timestamp => OID_TIMESTAMP,
+            PgType::Uuid => OID_UUID,
             PgType::Unknown(oid) => oid,
         }
     }
@@ -73,7 +73,8 @@ impl PgType {
 pub fn decode_i32(bytes: &[u8]) -> Result<i32> {
     let s = std::str::from_utf8(bytes)
         .map_err(|_| DbError::TypeMismatch("non-UTF-8 int4 value".into()))?;
-    s.trim().parse::<i32>()
+    s.trim()
+        .parse::<i32>()
         .map_err(|e| DbError::TypeMismatch(format!("cannot parse int4 '{s}': {e}")))
 }
 
@@ -81,7 +82,8 @@ pub fn decode_i32(bytes: &[u8]) -> Result<i32> {
 pub fn decode_i64(bytes: &[u8]) -> Result<i64> {
     let s = std::str::from_utf8(bytes)
         .map_err(|_| DbError::TypeMismatch("non-UTF-8 int8 value".into()))?;
-    s.trim().parse::<i64>()
+    s.trim()
+        .parse::<i64>()
         .map_err(|e| DbError::TypeMismatch(format!("cannot parse int8 '{s}': {e}")))
 }
 
@@ -89,15 +91,16 @@ pub fn decode_i64(bytes: &[u8]) -> Result<i64> {
 pub fn decode_f64(bytes: &[u8]) -> Result<f64> {
     let s = std::str::from_utf8(bytes)
         .map_err(|_| DbError::TypeMismatch("non-UTF-8 float8 value".into()))?;
-    s.trim().parse::<f64>()
+    s.trim()
+        .parse::<f64>()
         .map_err(|e| DbError::TypeMismatch(format!("cannot parse float8 '{s}': {e}")))
 }
 
 /// Decode a text-format column value as `bool`.
 pub fn decode_bool(bytes: &[u8]) -> Result<bool> {
     match bytes {
-        b"t" | b"true"  | b"TRUE"  | b"yes" | b"on"  | b"1" => Ok(true),
-        b"f" | b"false" | b"FALSE" | b"no"  | b"off" | b"0" => Ok(false),
+        b"t" | b"true" | b"TRUE" | b"yes" | b"on" | b"1" => Ok(true),
+        b"f" | b"false" | b"FALSE" | b"no" | b"off" | b"0" => Ok(false),
         other => {
             let s = String::from_utf8_lossy(other);
             Err(DbError::TypeMismatch(format!("cannot parse bool '{s}'")))
@@ -114,16 +117,28 @@ pub fn decode_text(bytes: &[u8]) -> Result<String> {
 // ── Text-format encode helpers ────────────────────────────────────────────────
 
 /// Encode `i32` to its text-format parameter representation.
-pub fn encode_i32(v: i32) -> String { v.to_string() }
+pub fn encode_i32(v: i32) -> String {
+    v.to_string()
+}
 
 /// Encode `i64` to its text-format parameter representation.
-pub fn encode_i64(v: i64) -> String { v.to_string() }
+pub fn encode_i64(v: i64) -> String {
+    v.to_string()
+}
 
 /// Encode `f64` to its text-format parameter representation.
-pub fn encode_f64(v: f64) -> String { v.to_string() }
+pub fn encode_f64(v: f64) -> String {
+    v.to_string()
+}
 
 /// Encode `bool` to PostgreSQL text format (`t` / `f`).
-pub fn encode_bool(v: bool) -> &'static str { if v { "t" } else { "f" } }
+pub fn encode_bool(v: bool) -> &'static str {
+    if v {
+        "t"
+    } else {
+        "f"
+    }
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -133,7 +148,13 @@ mod tests {
 
     #[test]
     fn oid_roundtrip() {
-        for pg_type in [PgType::Bool, PgType::Int4, PgType::Int8, PgType::Float8, PgType::Text] {
+        for pg_type in [
+            PgType::Bool,
+            PgType::Int4,
+            PgType::Int8,
+            PgType::Float8,
+            PgType::Text,
+        ] {
             assert_eq!(PgType::from_oid(pg_type.oid()), pg_type);
         }
     }
@@ -153,7 +174,9 @@ mod tests {
     }
 
     #[test]
-    fn decode_i32_invalid() { assert!(decode_i32(b"abc").is_err()); }
+    fn decode_i32_invalid() {
+        assert!(decode_i32(b"abc").is_err());
+    }
 
     #[test]
     fn decode_i64_valid() {
@@ -162,8 +185,8 @@ mod tests {
 
     #[test]
     fn decode_f64_valid() {
-        let v = decode_f64(b"3.14").unwrap();
-        assert!((v - 3.14).abs() < 1e-10);
+        let v = decode_f64(b"2.72").unwrap();
+        assert!((v - 2.72).abs() < 1e-10);
     }
 
     #[test]

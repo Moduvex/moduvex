@@ -16,14 +16,14 @@ use crate::status::StatusCode;
 /// For `Body::Stream` `Transfer-Encoding: chunked` is used.
 /// For `Body::Empty` no body headers are added (0-length assumed).
 pub fn encode_response(response: Response, out: &mut Vec<u8>) {
-    let status  = response.status;
+    let status = response.status;
     let headers = response.headers;
-    let body    = response.body;
+    let body = response.body;
 
     // Determine body framing up front.
     let (content_length, use_chunked) = match &body {
-        Body::Empty     => (Some(0usize), false),
-        Body::Fixed(v)  => (Some(v.len()), false),
+        Body::Empty => (Some(0usize), false),
+        Body::Fixed(v) => (Some(v.len()), false),
         Body::Stream(_) => (None, true),
     };
 
@@ -52,8 +52,8 @@ pub fn encode_response(response: Response, out: &mut Vec<u8>) {
 
     // Body bytes.
     match body {
-        Body::Empty     => {}
-        Body::Fixed(v)  => out.extend_from_slice(&v),
+        Body::Empty => {}
+        Body::Fixed(v) => out.extend_from_slice(&v),
         Body::Stream(rx) => {
             // Drain already-queued chunks as chunked TE.
             loop {
@@ -74,9 +74,9 @@ pub fn encode_response(response: Response, out: &mut Vec<u8>) {
 pub fn encode_error(status: StatusCode, msg: &str, out: &mut Vec<u8>) {
     write_status_line(out, status);
     let len = msg.len().to_string();
-    write_header(out, b"Content-Type",   b"text/plain; charset=utf-8");
+    write_header(out, b"Content-Type", b"text/plain; charset=utf-8");
     write_header(out, b"Content-Length", len.as_bytes());
-    write_header(out, b"Connection",     b"close");
+    write_header(out, b"Connection", b"close");
     out.extend_from_slice(b"\r\n");
     out.extend_from_slice(msg.as_bytes());
 }

@@ -17,7 +17,6 @@ pub mod connection;
 pub mod listener;
 pub mod tls;
 
-use std::any::Any;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -25,25 +24,28 @@ use moduvex_runtime::{block_on_with_spawn, spawn};
 
 use crate::extract::IntoHandler;
 use crate::middleware::Middleware;
+use crate::request::Request;
 use crate::routing::method::Method;
 use crate::routing::router::Router;
-use crate::request::Request;
 
 use connection::{ConnConfig, Connection};
 use listener::Listener;
+
+/// Type alias for the state injector function.
+type StateInjector = Arc<dyn Fn(&mut Request) + Send + Sync>;
 
 // ── HttpServer ────────────────────────────────────────────────────────────────
 
 /// Builder for the HTTP server. Configure routes, middleware, then `serve()`.
 pub struct HttpServer {
-    addr:        SocketAddr,
-    router:      Router,
-    config:      ConnConfig,
+    addr: SocketAddr,
+    router: Router,
+    config: ConnConfig,
     middlewares: Vec<Arc<dyn Middleware>>,
     /// Type-erased state injector — inserts T into each request's extensions.
-    state_injector: Option<Arc<dyn Fn(&mut Request) + Send + Sync>>,
+    state_injector: Option<StateInjector>,
     #[cfg(feature = "tls")]
-    tls_config:  Option<tls::TlsConfig>,
+    tls_config: Option<tls::TlsConfig>,
 }
 
 impl HttpServer {
@@ -72,27 +74,32 @@ impl HttpServer {
 
     /// Register a GET route.
     pub fn get<T>(mut self, pattern: &str, h: impl IntoHandler<T>) -> Self {
-        self.router = self.router.get(pattern, h); self
+        self.router = self.router.get(pattern, h);
+        self
     }
 
     /// Register a POST route.
     pub fn post<T>(mut self, pattern: &str, h: impl IntoHandler<T>) -> Self {
-        self.router = self.router.post(pattern, h); self
+        self.router = self.router.post(pattern, h);
+        self
     }
 
     /// Register a PUT route.
     pub fn put<T>(mut self, pattern: &str, h: impl IntoHandler<T>) -> Self {
-        self.router = self.router.put(pattern, h); self
+        self.router = self.router.put(pattern, h);
+        self
     }
 
     /// Register a DELETE route.
     pub fn delete<T>(mut self, pattern: &str, h: impl IntoHandler<T>) -> Self {
-        self.router = self.router.delete(pattern, h); self
+        self.router = self.router.delete(pattern, h);
+        self
     }
 
     /// Set a custom fallback handler for unmatched routes.
     pub fn fallback<T>(mut self, handler: impl IntoHandler<T>) -> Self {
-        self.router = self.router.fallback(handler); self
+        self.router = self.router.fallback(handler);
+        self
     }
 
     /// Add a middleware to the pipeline (executed in registration order).
@@ -131,20 +138,20 @@ impl HttpServer {
         let router = Arc::new(self.router);
         let config = self.config;
         let middlewares = Arc::new(self.middlewares);
-        let state_injector = self.state_injector.map(Arc::from);
+        let state_injector = self.state_injector;
 
         block_on_with_spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((stream, peer_addr)) => {
-                        let router  = Arc::clone(&router);
-                        let config  = config.clone();
-                        let mws     = Arc::clone(&middlewares);
-                        let inj     = state_injector.clone();
-                        let _ = spawn(async move {
+                        let router = Arc::clone(&router);
+                        let config = config.clone();
+                        let mws = Arc::clone(&middlewares);
+                        let inj = state_injector.clone();
+                        drop(spawn(async move {
                             let conn = Connection::new(stream, peer_addr, config);
                             conn.run(&router, &mws, &inj).await;
-                        });
+                        }));
                     }
                     Err(e) => {
                         eprintln!("moduvex-http: accept error: {e}");

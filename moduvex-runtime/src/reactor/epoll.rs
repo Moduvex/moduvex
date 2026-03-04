@@ -11,13 +11,12 @@ use std::io;
 use std::os::unix::io::RawFd;
 
 use libc::{
-    epoll_create1, epoll_ctl, epoll_event, epoll_wait,
-    EPOLLET, EPOLLIN, EPOLLOUT, EPOLLONESHOT,
+    epoll_create1, epoll_ctl, epoll_event, epoll_wait, EPOLLET, EPOLLIN, EPOLLONESHOT, EPOLLOUT,
     EPOLL_CLOEXEC, EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD,
 };
 
-use crate::platform::sys::{Event, Events, Interest, RawSource};
 use super::ReactorBackend;
+use crate::platform::sys::{Event, Events, Interest, RawSource};
 
 /// Default maximum events to collect per `poll` call.
 const MAX_EVENTS: usize = 1024;
@@ -100,9 +99,7 @@ impl ReactorBackend for EpollReactor {
         // SAFETY: `EPOLL_CTL_DEL` ignores the event pointer on Linux ≥ 2.6.9;
         // passing null is documented as safe. `source` must have been
         // registered previously — callers must uphold this invariant.
-        let rc = unsafe {
-            epoll_ctl(self.epoll_fd, EPOLL_CTL_DEL, source, std::ptr::null_mut())
-        };
+        let rc = unsafe { epoll_ctl(self.epoll_fd, EPOLL_CTL_DEL, source, std::ptr::null_mut()) };
         if rc == -1 {
             Err(io::Error::last_os_error())
         } else {
@@ -123,9 +120,7 @@ impl ReactorBackend for EpollReactor {
         // SAFETY: `raw` has at least `cap` slots of uninitialised memory.
         // `epoll_wait` fills exactly `n` of them and returns `n` (0 ≤ n ≤ cap).
         // We immediately set the length to `n` before reading any element.
-        let n = unsafe {
-            epoll_wait(self.epoll_fd, raw.as_mut_ptr(), cap as i32, timeout)
-        };
+        let n = unsafe { epoll_wait(self.epoll_fd, raw.as_mut_ptr(), cap as i32, timeout) };
         if n == -1 {
             let err = io::Error::last_os_error();
             // EINTR is not a real error — the caller should retry.
@@ -175,7 +170,9 @@ mod tests {
     fn register_and_deregister_pipe_read_end() {
         let reactor = EpollReactor::new().unwrap();
         let (r, w) = create_pipe().unwrap();
-        reactor.register(r, 1, Interest::READABLE).expect("register failed");
+        reactor
+            .register(r, 1, Interest::READABLE)
+            .expect("register failed");
         reactor.deregister(r).expect("deregister failed");
         unsafe { libc::close(r) };
         unsafe { libc::close(w) };

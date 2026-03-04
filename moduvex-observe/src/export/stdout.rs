@@ -49,8 +49,7 @@ mod tests {
     #[test]
     fn stdout_exporter_does_not_panic() {
         let exporter = StdoutExporter::json();
-        let event = Event::now(Level::Info, "test event")
-            .field("key", "value");
+        let event = Event::now(Level::Info, "test event").field("key", "value");
         exporter.on_event(&event);
     }
 }

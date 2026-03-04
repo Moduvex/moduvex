@@ -13,9 +13,8 @@ use moduvex_runtime::net::TcpStream;
 use crate::error::{DbError, Result};
 use crate::protocol::postgres::auth::md5_password;
 use crate::protocol::postgres::codec::{
-    BackendMessage, ColumnDesc,
-    MSG_QUERY, MSG_PASSWORD, MSG_TERMINATE,
-    decode_backend, encode_startup, encode_query, encode_password,
+    decode_backend, encode_password, encode_query, encode_startup, BackendMessage, ColumnDesc,
+    MSG_PASSWORD, MSG_QUERY, MSG_TERMINATE,
 };
 use crate::protocol::postgres::wire::{
     read_backend_message, write_frontend_message, write_startup_message,
@@ -34,20 +33,26 @@ pub struct PgColumn {
 #[derive(Debug, Clone)]
 pub struct PgRow {
     pub columns: Vec<PgColumn>,
-    pub fields:  Vec<Option<Vec<u8>>>,
+    pub fields: Vec<Option<Vec<u8>>>,
 }
 
 /// Complete result set: column metadata + all rows.
 #[derive(Debug)]
 pub struct PgRowSet {
     pub columns: Vec<PgColumn>,
-    pub rows:    Vec<PgRow>,
+    pub rows: Vec<PgRow>,
 }
 
 impl PgRowSet {
-    pub fn len(&self) -> usize { self.rows.len() }
-    pub fn is_empty(&self) -> bool { self.rows.is_empty() }
-    pub fn iter(&self) -> impl Iterator<Item = &PgRow> { self.rows.iter() }
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &PgRow> {
+        self.rows.iter()
+    }
 }
 
 // ── PgConnection ──────────────────────────────────────────────────────────────
@@ -67,12 +72,7 @@ impl PgConnection {
     /// * `user`     — PostgreSQL username
     /// * `password` — plaintext password
     /// * `database` — database name
-    pub async fn connect(
-        addr: &str,
-        user: &str,
-        password: &str,
-        database: &str,
-    ) -> Result<Self> {
+    pub async fn connect(addr: &str, user: &str, password: &str, database: &str) -> Result<Self> {
         let sock_addr: std::net::SocketAddr = addr
             .parse()
             .map_err(|e| DbError::Other(format!("invalid address '{addr}': {e}")))?;
@@ -102,8 +102,16 @@ impl PgConnection {
                 BackendMessage::ReadyForQuery { .. } => {
                     return Ok(PgConnection { stream, params });
                 }
-                BackendMessage::ErrorResponse { code, message, detail } => {
-                    return Err(DbError::ServerError { code, message, detail });
+                BackendMessage::ErrorResponse {
+                    code,
+                    message,
+                    detail,
+                } => {
+                    return Err(DbError::ServerError {
+                        code,
+                        message,
+                        detail,
+                    });
                 }
                 BackendMessage::NoticeResponse => {}
                 other => {
@@ -127,30 +135,45 @@ impl PgConnection {
             let (msg_type, payload) = read_backend_message(&mut self.stream).await?;
             match decode_backend(msg_type, &payload)? {
                 BackendMessage::RowDescription(col_descs) => {
-                    columns = col_descs.into_iter()
-                        .map(|d: ColumnDesc| PgColumn { name: d.name, type_oid: d.type_oid })
+                    columns = col_descs
+                        .into_iter()
+                        .map(|d: ColumnDesc| PgColumn {
+                            name: d.name,
+                            type_oid: d.type_oid,
+                        })
                         .collect();
                 }
                 BackendMessage::DataRow(fields) => {
-                    rows.push(PgRow { columns: columns.clone(), fields });
+                    rows.push(PgRow {
+                        columns: columns.clone(),
+                        fields,
+                    });
                 }
                 BackendMessage::CommandComplete { .. } => {}
                 BackendMessage::ReadyForQuery { status } => {
                     if status == b'E' {
                         return Err(DbError::Protocol(
-                            "server in error state after query".into()
+                            "server in error state after query".into(),
                         ));
                     }
                     break;
                 }
-                BackendMessage::ErrorResponse { code, message, detail } => {
+                BackendMessage::ErrorResponse {
+                    code,
+                    message,
+                    detail,
+                } => {
                     self.drain_until_ready().await?;
-                    return Err(DbError::ServerError { code, message, detail });
+                    return Err(DbError::ServerError {
+                        code,
+                        message,
+                        detail,
+                    });
                 }
                 BackendMessage::ParameterStatus { .. } | BackendMessage::NoticeResponse => {}
                 BackendMessage::AuthOk | BackendMessage::AuthMd5 { .. } => {
                     return Err(DbError::Protocol(
-                        "unexpected auth message during query".into()
+                        "unexpected auth message during query".into(),
                     ));
                 }
             }
@@ -172,9 +195,17 @@ impl PgConnection {
                     affected = parse_affected_rows(&tag);
                 }
                 BackendMessage::ReadyForQuery { .. } => break,
-                BackendMessage::ErrorResponse { code, message, detail } => {
+                BackendMessage::ErrorResponse {
+                    code,
+                    message,
+                    detail,
+                } => {
                     self.drain_until_ready().await?;
-                    return Err(DbError::ServerError { code, message, detail });
+                    return Err(DbError::ServerError {
+                        code,
+                        message,
+                        detail,
+                    });
                 }
                 BackendMessage::RowDescription(_) | BackendMessage::DataRow(_) => {}
                 BackendMessage::ParameterStatus { .. } | BackendMessage::NoticeResponse => {}

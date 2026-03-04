@@ -26,9 +26,9 @@ pub use error::ConfigError;
 pub use profile::Profile;
 pub use validate::{Validate, ValidationError};
 
+use serde::de::DeserializeOwned;
 use std::path::Path;
 use std::sync::Arc;
-use serde::de::DeserializeOwned;
 
 /// Main config loader. Holds the merged TOML tree after loading.
 #[derive(Debug, Clone)]
@@ -57,7 +57,10 @@ impl ConfigLoader {
     ) -> Result<Self, ConfigError> {
         let toml_val = loader::load_toml(dir, name, &profile)?;
         let merged = merge::merge_env_overrides(toml_val);
-        Ok(Self { root: merged, profile })
+        Ok(Self {
+            root: merged,
+            profile,
+        })
     }
 
     /// Create a ConfigLoader from embedded TOML defaults only (no file).
@@ -65,24 +68,31 @@ impl ConfigLoader {
     /// Useful for starters that provide sensible defaults without requiring
     /// an `app.toml` file. Env var overrides are still applied.
     pub fn from_defaults(defaults: &str) -> Result<Self, ConfigError> {
-        let base: toml::Value = defaults.parse().map_err(|e: toml::de::Error| {
-            ConfigError::Parse { path: "<defaults>".into(), source: e.to_string() }
-        })?;
+        let base: toml::Value =
+            defaults
+                .parse()
+                .map_err(|e: toml::de::Error| ConfigError::Parse {
+                    path: "<defaults>".into(),
+                    source: e.to_string(),
+                })?;
         let merged = merge::merge_env_overrides(base);
-        Ok(Self { root: merged, profile: Profile::from_env() })
+        Ok(Self {
+            root: merged,
+            profile: Profile::from_env(),
+        })
     }
 
     /// Load config with embedded defaults as the lowest-priority layer.
     ///
     /// Merge order: defaults → file → profile overlay → env vars.
-    pub fn load_with_defaults(
-        defaults: &str,
-        name: &str,
-        dir: &Path,
-    ) -> Result<Self, ConfigError> {
-        let default_val: toml::Value = defaults.parse().map_err(|e: toml::de::Error| {
-            ConfigError::Parse { path: "<defaults>".into(), source: e.to_string() }
-        })?;
+    pub fn load_with_defaults(defaults: &str, name: &str, dir: &Path) -> Result<Self, ConfigError> {
+        let default_val: toml::Value =
+            defaults
+                .parse()
+                .map_err(|e: toml::de::Error| ConfigError::Parse {
+                    path: "<defaults>".into(),
+                    source: e.to_string(),
+                })?;
         let profile = Profile::from_env();
         // Try loading file; if missing, just use defaults
         let file_val = loader::load_toml(dir, name, &profile);
@@ -91,7 +101,10 @@ impl ConfigLoader {
             Err(_) => default_val,
         };
         let merged = merge::merge_env_overrides(base);
-        Ok(Self { root: merged, profile })
+        Ok(Self {
+            root: merged,
+            profile,
+        })
     }
 
     /// Extract a config section and deserialize into `T`.

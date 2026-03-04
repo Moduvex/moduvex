@@ -24,7 +24,9 @@ pub(crate) struct StealableQueue {
 
 impl StealableQueue {
     pub(crate) fn new() -> Self {
-        Self { inner: Mutex::new(LocalQueue::new()) }
+        Self {
+            inner: Mutex::new(LocalQueue::new()),
+        }
     }
 
     /// Exclusive mutable access for the owning worker.

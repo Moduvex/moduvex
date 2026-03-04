@@ -47,27 +47,25 @@ pub mod tx;
 // ── Top-level re-exports ──────────────────────────────────────────────────────
 
 pub use app::{AppContext, Configured, Moduvex, RequestContext, Unconfigured};
+pub use di::{Inject, Provider, RequestScoped, Singleton, TypeMap};
+pub use error::chain::Context as ErrorContext;
+pub use error::classify::{ConfigError, DomainError, InfraError, LifecycleError};
 pub use error::{ModuvexError, Result};
 pub use lifecycle::{
     HookRegistry, LifecycleEngine, LifecycleHook, Phase, ShutdownConfig, ShutdownHandle,
 };
 pub use module::{
-    AllDepsOk, ContainsAll, ContainsModule, DependsOn, ErasedHandler,
-    Here, Module, ModuleLifecycle, ModuleRoutes, RouteSink, There,
+    AllDepsOk, ContainsAll, ContainsModule, DependsOn, ErasedHandler, Here, Module,
+    ModuleLifecycle, ModuleRoutes, RouteSink, There,
 };
-pub use di::{Inject, Provider, RequestScoped, Singleton, TypeMap};
 pub use tx::TransactionBoundary;
-pub use error::classify::{ConfigError, DomainError, InfraError, LifecycleError};
-pub use error::chain::Context as ErrorContext;
 
 // ── Proc macro re-exports ───────────────────────────────────────────────────
 // Users only need to depend on moduvex-core, not moduvex-macros directly.
 
-pub use moduvex_macros::{
-    Component, DomainError, InfraError, Module as DeriveModule,
-};
 pub use moduvex_macros::main as moduvex_main;
 pub use moduvex_macros::module as moduvex_module;
+pub use moduvex_macros::{Component, DomainError, InfraError, Module as DeriveModule};
 
 // ── Prelude ───────────────────────────────────────────────────────────────────
 
@@ -76,11 +74,9 @@ pub use moduvex_macros::module as moduvex_module;
 /// Add `use moduvex_core::prelude::*;` to your module files.
 pub mod prelude {
     pub use crate::app::{AppContext, Moduvex, RequestContext};
-    pub use crate::error::{ModuvexError, Result};
-    pub use crate::error::chain::Context as ErrorContext;
-    pub use crate::module::{
-        AllDepsOk, DependsOn, Module, ModuleLifecycle, ModuleRoutes,
-    };
     pub use crate::di::{Inject, Singleton};
+    pub use crate::error::chain::Context as ErrorContext;
+    pub use crate::error::{ModuvexError, Result};
     pub use crate::lifecycle::{Phase, ShutdownHandle};
+    pub use crate::module::{AllDepsOk, DependsOn, Module, ModuleLifecycle, ModuleRoutes};
 }

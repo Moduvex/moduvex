@@ -76,7 +76,9 @@ impl Moduvex<Unconfigured, ()> {
 }
 
 impl Default for Moduvex<Unconfigured, ()> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Configured state — module registration ────────────────────────────────────
@@ -155,17 +157,19 @@ impl<Modules> Moduvex<Configured, Modules> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::pin::Pin;
-    use std::future::Future;
     use crate::app::context::AppContext;
     use crate::error::Result;
+    use std::future::Future;
+    use std::pin::Pin;
 
     // ── Minimal test module ──────────────────────────────────────────────────
 
     struct NoopModule;
 
     impl Module for NoopModule {
-        fn name(&self) -> &'static str { "noop" }
+        fn name(&self) -> &'static str {
+            "noop"
+        }
     }
 
     impl DependsOn for NoopModule {
@@ -173,14 +177,16 @@ mod tests {
     }
 
     impl ModuleLifecycle for NoopModule {
-        fn on_start<'a>(&'a self, _ctx: &'a AppContext)
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-        {
+        fn on_start<'a>(
+            &'a self,
+            _ctx: &'a AppContext,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
             Box::pin(async { Ok(()) })
         }
-        fn on_stop<'a>(&'a self, _ctx: &'a AppContext)
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-        {
+        fn on_stop<'a>(
+            &'a self,
+            _ctx: &'a AppContext,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
             Box::pin(async { Ok(()) })
         }
     }
@@ -199,9 +205,7 @@ mod tests {
 
     #[test]
     fn module_registration_compiles() {
-        let _b = Moduvex::new()
-            .config("app.toml")
-            .module(NoopModule);
+        let _b = Moduvex::new().config("app.toml").module(NoopModule);
         // Compiles = module<M>() returns correct type.
     }
 
@@ -209,7 +213,7 @@ mod tests {
     fn run_with_no_dep_module_completes() {
         // NoopModule has no deps so AllDependenciesSatisfied is trivially true.
         moduvex_runtime::block_on(async {
-            let handle = {
+            {
                 // We need to trigger shutdown programmatically.
                 // Build engine manually so we can grab the handle.
                 let mut registry = ModuleRegistry::new();
@@ -225,7 +229,6 @@ mod tests {
                 let result = engine.run().await;
                 assert!(result.is_ok());
             };
-            let _ = handle;
         });
     }
 

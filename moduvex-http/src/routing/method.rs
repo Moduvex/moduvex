@@ -17,29 +17,29 @@ impl Method {
     /// Parse from a raw byte slice (case-sensitive per RFC 9110).
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
         match b {
-            b"GET"     => Some(Self::GET),
-            b"POST"    => Some(Self::POST),
-            b"PUT"     => Some(Self::PUT),
-            b"DELETE"  => Some(Self::DELETE),
-            b"PATCH"   => Some(Self::PATCH),
-            b"HEAD"    => Some(Self::HEAD),
+            b"GET" => Some(Self::GET),
+            b"POST" => Some(Self::POST),
+            b"PUT" => Some(Self::PUT),
+            b"DELETE" => Some(Self::DELETE),
+            b"PATCH" => Some(Self::PATCH),
+            b"HEAD" => Some(Self::HEAD),
             b"OPTIONS" => Some(Self::OPTIONS),
-            b"TRACE"   => Some(Self::TRACE),
-            _          => None,
+            b"TRACE" => Some(Self::TRACE),
+            _ => None,
         }
     }
 
     /// Wire representation string.
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::GET     => "GET",
-            Self::POST    => "POST",
-            Self::PUT     => "PUT",
-            Self::DELETE  => "DELETE",
-            Self::PATCH   => "PATCH",
-            Self::HEAD    => "HEAD",
+            Self::GET => "GET",
+            Self::POST => "POST",
+            Self::PUT => "PUT",
+            Self::DELETE => "DELETE",
+            Self::PATCH => "PATCH",
+            Self::HEAD => "HEAD",
             Self::OPTIONS => "OPTIONS",
-            Self::TRACE   => "TRACE",
+            Self::TRACE => "TRACE",
         }
     }
 
@@ -50,7 +50,10 @@ impl Method {
 
     /// True if this method is idempotent (per RFC 9110 §9.2.2).
     pub fn is_idempotent(self) -> bool {
-        matches!(self, Self::GET | Self::HEAD | Self::PUT | Self::DELETE | Self::OPTIONS | Self::TRACE)
+        matches!(
+            self,
+            Self::GET | Self::HEAD | Self::PUT | Self::DELETE | Self::OPTIONS | Self::TRACE
+        )
     }
 }
 

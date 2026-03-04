@@ -17,20 +17,16 @@
 use std::sync::Arc;
 use std::task::{RawWaker, RawWakerVTable, Waker};
 
-use super::task::{TaskHeader, STATE_IDLE, STATE_SCHEDULED};
 use super::scheduler::GlobalQueue;
+use super::task::{TaskHeader, STATE_IDLE, STATE_SCHEDULED};
 
 use std::sync::atomic::Ordering;
 
 // ── Vtable ────────────────────────────────────────────────────────────────────
 
 /// The single static vtable shared by all task wakers.
-static TASK_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    clone_waker,
-    wake,
-    wake_by_ref,
-    drop_waker,
-);
+static TASK_WAKER_VTABLE: RawWakerVTable =
+    RawWakerVTable::new(clone_waker, wake, wake_by_ref, drop_waker);
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
@@ -97,7 +93,7 @@ unsafe fn wake(ptr: *const ()) {
 unsafe fn wake_by_ref(ptr: *const ()) {
     // SAFETY: same pointer contract; we borrow without consuming.
     let data = data_ref(ptr);
-    schedule_task(&*data);
+    schedule_task(&data);
     // ManuallyDrop — refcount unchanged.
 }
 

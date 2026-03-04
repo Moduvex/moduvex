@@ -8,18 +8,18 @@
 //! On any phase failure the engine rolls back by calling `on_stop()` on all
 //! modules that successfully completed `on_start()`, in reverse order.
 
-pub mod phase;
 pub mod hook;
+pub mod phase;
 pub mod shutdown;
 
-pub use phase::Phase;
 pub use hook::{HookRegistry, LifecycleHook};
-pub use shutdown::{ShutdownConfig, ShutdownHandle, wait_for_shutdown};
+pub use phase::Phase;
+pub use shutdown::{wait_for_shutdown, ShutdownConfig, ShutdownHandle};
 
 use std::sync::Arc;
 
 use crate::app::context::AppContext;
-use crate::error::{ModuvexError, Result, classify::LifecycleError};
+use crate::error::{classify::LifecycleError, ModuvexError, Result};
 use crate::module::registry::ModuleRegistry;
 
 // ── LifecycleEngine ───────────────────────────────────────────────────────────
@@ -69,7 +69,13 @@ impl LifecycleEngine {
     /// Returns `Ok(())` after a clean shutdown, or `Err` if any phase fails
     /// and rollback cannot complete cleanly (the original error is returned).
     pub async fn run(self) -> Result<()> {
-        let LifecycleEngine { registry, ctx, hooks, shutdown_cfg: _, shutdown_handle } = self;
+        let LifecycleEngine {
+            registry,
+            ctx,
+            hooks,
+            shutdown_cfg: _,
+            shutdown_handle,
+        } = self;
 
         // ── Boot sequence ────────────────────────────────────────────────────
         // Config and Validate phases are currently stubs — real config loading
@@ -83,12 +89,11 @@ impl LifecycleEngine {
         // Call on_start() on each module in boot order.
         // Track how many modules started successfully for rollback purposes.
         let entries = registry.into_entries();
-        let mut started_count: usize = 0;
 
-        for entry in &entries {
+        for (idx, entry) in entries.iter().enumerate() {
             if let Err(e) = entry.lifecycle.on_start(&ctx).await {
                 // Partial boot failure — roll back already-started modules.
-                let rollback_err = rollback(&entries[..started_count], &ctx).await;
+                let rollback_err = rollback(&entries[..idx], &ctx).await;
                 if let Err(rb_err) = rollback_err {
                     // Log rollback failure but return original start error.
                     eprintln!(
@@ -97,10 +102,9 @@ impl LifecycleEngine {
                     );
                 }
                 return Err(ModuvexError::Lifecycle(
-                    LifecycleError::new(e.to_string()).in_module(entry.name)
+                    LifecycleError::new(e.to_string()).in_module(entry.name),
                 ));
             }
-            started_count += 1;
         }
 
         hooks.notify_phase_entered(Phase::Start, &ctx).await?;
@@ -132,10 +136,7 @@ async fn rollback(
 
     for entry in entries.iter().rev() {
         if let Err(e) = entry.lifecycle.on_stop(ctx).await {
-            eprintln!(
-                "[moduvex] error stopping module '{}': {}",
-                entry.name, e
-            );
+            eprintln!("[moduvex] error stopping module '{}': {}", entry.name, e);
             if first_err.is_none() {
                 first_err = Some(e);
             }
@@ -153,11 +154,11 @@ async fn rollback(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::pin::Pin;
-    use std::future::Future;
-    use std::sync::{Arc, Mutex};
-    use crate::module::{Module, ModuleLifecycle};
     use crate::module::registry::{ModuleEntry, ModuleRegistry};
+    use crate::module::{Module, ModuleLifecycle};
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
 
     // ── Test module that records start/stop calls ────────────────────────────
 
@@ -168,29 +169,35 @@ mod tests {
     }
 
     impl Module for RecordingModule {
-        fn name(&self) -> &'static str { self.name }
+        fn name(&self) -> &'static str {
+            self.name
+        }
     }
 
     impl ModuleLifecycle for RecordingModule {
-        fn on_start<'a>(&'a self, _ctx: &'a AppContext)
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-        {
+        fn on_start<'a>(
+            &'a self,
+            _ctx: &'a AppContext,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
             let log = Arc::clone(&self.log);
             let name = self.name;
             let fail = self.fail_on_start;
             Box::pin(async move {
                 log.lock().unwrap().push(format!("start:{name}"));
                 if fail {
-                    Err(ModuvexError::Lifecycle(LifecycleError::new("forced failure")))
+                    Err(ModuvexError::Lifecycle(LifecycleError::new(
+                        "forced failure",
+                    )))
                 } else {
                     Ok(())
                 }
             })
         }
 
-        fn on_stop<'a>(&'a self, _ctx: &'a AppContext)
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-        {
+        fn on_stop<'a>(
+            &'a self,
+            _ctx: &'a AppContext,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
             let log = Arc::clone(&self.log);
             let name = self.name;
             Box::pin(async move {
@@ -200,15 +207,15 @@ mod tests {
         }
     }
 
-    fn make_entry(
-        name: &'static str,
-        log: Arc<Mutex<Vec<String>>>,
-        fail: bool,
-    ) -> ModuleEntry {
+    fn make_entry(name: &'static str, log: Arc<Mutex<Vec<String>>>, fail: bool) -> ModuleEntry {
         ModuleEntry {
             name,
             priority: 0,
-            lifecycle: Box::new(RecordingModule { name, log, fail_on_start: fail }),
+            lifecycle: Box::new(RecordingModule {
+                name,
+                log,
+                fail_on_start: fail,
+            }),
         }
     }
 
@@ -239,7 +246,7 @@ mod tests {
         let log = Arc::new(Mutex::new(Vec::new()));
         let mut registry = ModuleRegistry::new();
         registry.push(make_entry("A", Arc::clone(&log), false));
-        registry.push(make_entry("B", Arc::clone(&log), true));  // B fails
+        registry.push(make_entry("B", Arc::clone(&log), true)); // B fails
 
         let ctx = Arc::new(AppContext::new());
         let engine = LifecycleEngine::new(registry, ctx);

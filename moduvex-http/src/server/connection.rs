@@ -18,6 +18,7 @@ use crate::request::{HttpVersion, Request};
 use crate::response::Response;
 use crate::routing::method::Method;
 use crate::routing::router::{BoxHandler, Router};
+use crate::server::StateInjector;
 use crate::status::StatusCode;
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -25,19 +26,19 @@ use crate::status::StatusCode;
 /// Per-connection configuration limits.
 #[derive(Debug, Clone)]
 pub struct ConnConfig {
-    pub max_read_buf:  usize,
+    pub max_read_buf: usize,
     pub max_body_size: u64,
-    pub max_requests:  u32,
-    pub parse_limits:  ParseLimits,
+    pub max_requests: u32,
+    pub parse_limits: ParseLimits,
 }
 
 impl Default for ConnConfig {
     fn default() -> Self {
         Self {
-            max_read_buf:  64 * 1024,
+            max_read_buf: 64 * 1024,
             max_body_size: 2 * 1024 * 1024,
-            max_requests:  1000,
-            parse_limits:  ParseLimits::default(),
+            max_requests: 1000,
+            parse_limits: ParseLimits::default(),
         }
     }
 }
@@ -45,12 +46,12 @@ impl Default for ConnConfig {
 // ── Parsed head (owned) ───────────────────────────────────────────────────────
 
 struct OwnedHead {
-    method:         Method,
-    path:           String,
-    query:          Option<String>,
-    version:        HttpVersion,
-    headers:        Vec<(String, Vec<u8>)>,
-    head_len:       usize,
+    method: Method,
+    path: String,
+    query: Option<String>,
+    version: HttpVersion,
+    headers: Vec<(String, Vec<u8>)>,
+    head_len: usize,
     has_chunked_te: bool,
     content_length: Option<u64>,
 }
@@ -59,15 +60,20 @@ struct OwnedHead {
 
 /// Drives a single TCP connection through the HTTP request/response cycle.
 pub struct Connection {
-    stream:          TcpStream,
-    peer_addr:       SocketAddr,
-    config:          ConnConfig,
+    stream: TcpStream,
+    peer_addr: SocketAddr,
+    config: ConnConfig,
     requests_served: u32,
 }
 
 impl Connection {
     pub fn new(stream: TcpStream, peer_addr: SocketAddr, config: ConnConfig) -> Self {
-        Self { stream, peer_addr, config, requests_served: 0 }
+        Self {
+            stream,
+            peer_addr,
+            config,
+            requests_served: 0,
+        }
     }
 
     /// Run the connection loop with middleware support.
@@ -75,25 +81,25 @@ impl Connection {
         mut self,
         router: &Router,
         middlewares: &Arc<Vec<Arc<dyn Middleware>>>,
-        req_extensions: &Option<Arc<dyn Fn(&mut Request) + Send + Sync>>,
+        req_extensions: &Option<StateInjector>,
     ) {
         let mut read_buf: Vec<u8> = Vec::with_capacity(4096);
 
         loop {
             // 1. Read head
             let head = match self.read_head(&mut read_buf).await {
-                Ok(h)  => h,
+                Ok(h) => h,
                 Err(_) => break,
             };
 
-            let head_len       = head.head_len;
-            let method         = head.method;
-            let path           = head.path.clone();
-            let query          = head.query.clone();
-            let version        = head.version;
+            let head_len = head.head_len;
+            let method = head.method;
+            let path = head.path.clone();
+            let query = head.query.clone();
+            let version = head.version;
             let keep_alive_req = is_keep_alive_request(version, &head.headers);
-            let cl             = head.content_length;
-            let is_chunked     = head.has_chunked_te;
+            let cl = head.content_length;
+            let is_chunked = head.has_chunked_te;
 
             let mut req_headers = HeaderMap::new();
             for (name, value) in &head.headers {
@@ -104,16 +110,17 @@ impl Connection {
             // 2. Read body
             let body = if is_chunked {
                 match self.read_chunked_body(&mut read_buf).await {
-                    Ok(b)  => b,
+                    Ok(b) => b,
                     Err(_) => break,
                 }
             } else if let Some(len) = cl {
                 if len > self.config.max_body_size {
-                    self.send_error(StatusCode::CONTENT_TOO_LARGE, "body too large").await;
+                    self.send_error(StatusCode::CONTENT_TOO_LARGE, "body too large")
+                        .await;
                     break;
                 }
                 match self.read_fixed_body(&mut read_buf, len as usize).await {
-                    Ok(b)  => b,
+                    Ok(b) => b,
                     Err(_) => break,
                 }
             } else {
@@ -121,12 +128,12 @@ impl Connection {
             };
 
             // 3. Build Request
-            let mut req    = Request::new(method, path);
-            req.query      = query;
-            req.version    = version;
-            req.headers    = req_headers;
-            req.body       = body;
-            req.peer_addr  = Some(self.peer_addr);
+            let mut req = Request::new(method, path);
+            req.query = query;
+            req.version = version;
+            req.headers = req_headers;
+            req.body = body;
+            req.peer_addr = Some(self.peer_addr);
 
             // Inject per-request extensions (e.g. app state)
             if let Some(inject) = req_extensions {
@@ -144,7 +151,9 @@ impl Connection {
                         Some(fb) => Arc::clone(fb),
                         None => Arc::new(Box::new(|_r| {
                             Box::pin(async { Response::not_found() })
-                                as std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
+                                as std::pin::Pin<
+                                    Box<dyn std::future::Future<Output = Response> + Send>,
+                                >
                         }) as BoxHandler),
                     };
                     middleware::dispatch(middlewares, &fb, req).await
@@ -153,8 +162,8 @@ impl Connection {
 
             // HEAD: strip body but preserve headers
             let response = if method == Method::HEAD {
-                let mut r   = Response::new(response.status);
-                r.headers   = response.headers;
+                let mut r = Response::new(response.status);
+                r.headers = response.headers;
                 r
             } else {
                 response
@@ -176,8 +185,12 @@ impl Connection {
             }
             encode_response(resp, &mut out);
 
-            if self.write_all(&out).await.is_err() { break; }
-            if !keep_alive { break; }
+            if self.write_all(&out).await.is_err() {
+                break;
+            }
+            if !keep_alive {
+                break;
+            }
         }
     }
 
@@ -190,14 +203,16 @@ impl Connection {
                 match parse_request_head(slice, &self.config.parse_limits) {
                     ParseStatus::Complete(head) => {
                         let owned = OwnedHead {
-                            method:         head.method,
-                            path:           head.path.to_string(),
-                            query:          head.query.map(str::to_string),
-                            version:        head.version,
-                            headers:        head.headers.iter()
+                            method: head.method,
+                            path: head.path.to_string(),
+                            query: head.query.map(str::to_string),
+                            version: head.version,
+                            headers: head
+                                .headers
+                                .iter()
                                 .map(|(n, v)| (n.to_string(), v.to_vec()))
                                 .collect(),
-                            head_len:       head.head_len,
+                            head_len: head.head_len,
                             has_chunked_te: head.has_chunked_te,
                             content_length: head.content_length,
                         };
@@ -209,7 +224,7 @@ impl Connection {
             };
 
             match complete {
-                Some(Ok(owned))  => return Ok(owned),
+                Some(Ok(owned)) => return Ok(owned),
                 Some(Err(e)) => {
                     let status = parse_error_to_status(&e);
                     self.send_error(status, "parse error").await;
@@ -220,14 +235,16 @@ impl Connection {
                         self.send_error(
                             StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
                             "headers too large",
-                        ).await;
+                        )
+                        .await;
                         return Err(());
                     }
                     let mut tmp = [0u8; 4096];
                     let n = self.read_some(&mut tmp).await.map_err(|_| ())?;
                     if n == 0 {
                         if !buf.is_empty() {
-                            self.send_error(StatusCode::BAD_REQUEST, "unexpected EOF").await;
+                            self.send_error(StatusCode::BAD_REQUEST, "unexpected EOF")
+                                .await;
                         }
                         return Err(());
                     }
@@ -242,7 +259,8 @@ impl Connection {
             let mut tmp = [0u8; 4096];
             let n = self.read_some(&mut tmp).await.map_err(|_| ())?;
             if n == 0 {
-                self.send_error(StatusCode::BAD_REQUEST, "unexpected EOF in body").await;
+                self.send_error(StatusCode::BAD_REQUEST, "unexpected EOF in body")
+                    .await;
                 return Err(());
             }
             buf.extend_from_slice(&tmp[..n]);
@@ -260,19 +278,22 @@ impl Connection {
                         return Ok(Body::Fixed(decoded));
                     }
                     Err(_) => {
-                        self.send_error(StatusCode::BAD_REQUEST, "bad chunked encoding").await;
+                        self.send_error(StatusCode::BAD_REQUEST, "bad chunked encoding")
+                            .await;
                         return Err(());
                     }
                 }
             }
             if buf.len() > self.config.max_body_size as usize + 1024 {
-                self.send_error(StatusCode::CONTENT_TOO_LARGE, "body too large").await;
+                self.send_error(StatusCode::CONTENT_TOO_LARGE, "body too large")
+                    .await;
                 return Err(());
             }
             let mut tmp = [0u8; 4096];
             let n = self.read_some(&mut tmp).await.map_err(|_| ())?;
             if n == 0 {
-                self.send_error(StatusCode::BAD_REQUEST, "unexpected EOF in chunked body").await;
+                self.send_error(StatusCode::BAD_REQUEST, "unexpected EOF in chunked body")
+                    .await;
                 return Err(());
             }
             buf.extend_from_slice(&tmp[..n]);
@@ -308,9 +329,15 @@ impl Connection {
 fn is_keep_alive_request(version: HttpVersion, headers: &[(String, Vec<u8>)]) -> bool {
     for (name, value) in headers {
         if name.eq_ignore_ascii_case("connection") {
-            let v = std::str::from_utf8(value).unwrap_or("").to_ascii_lowercase();
-            if v.contains("close") { return false; }
-            if v.contains("keep-alive") { return true; }
+            let v = std::str::from_utf8(value)
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if v.contains("close") {
+                return false;
+            }
+            if v.contains("keep-alive") {
+                return true;
+            }
         }
     }
     version == HttpVersion::Http11
@@ -322,9 +349,8 @@ fn parse_error_to_status(e: &ParseError) -> StatusCode {
         | ParseError::HeadersTooLarge
         | ParseError::TooManyHeaders
         | ParseError::HeaderValueTooLong => StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
-        ParseError::UnsupportedVersion   => StatusCode::HTTP_VERSION_NOT_SUPPORTED,
-        ParseError::AmbiguousBody
-        | ParseError::MultipleContentLength => StatusCode::BAD_REQUEST,
+        ParseError::UnsupportedVersion => StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+        ParseError::AmbiguousBody | ParseError::MultipleContentLength => StatusCode::BAD_REQUEST,
         _ => StatusCode::BAD_REQUEST,
     }
 }

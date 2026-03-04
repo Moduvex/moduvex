@@ -1,10 +1,10 @@
 //! Error system — `ModuvexError` enum with Domain/Infra/Config/Lifecycle classification.
 
-pub mod classify;
 pub mod chain;
+pub mod classify;
 
-pub use classify::{ConfigError, DomainError, InfraError, LifecycleError};
 pub use chain::Context;
+pub use classify::{ConfigError, DomainError, InfraError, LifecycleError};
 
 use std::fmt;
 
@@ -78,7 +78,10 @@ impl From<std::io::Error> for ModuvexError {
         impl InfraError for IoInfraError {
             fn is_retryable(&self) -> bool {
                 use std::io::ErrorKind::*;
-                matches!(self.0.kind(), ConnectionReset | ConnectionAborted | TimedOut | WouldBlock)
+                matches!(
+                    self.0.kind(),
+                    ConnectionReset | ConnectionAborted | TimedOut | WouldBlock
+                )
             }
         }
         Self::Infra(Box::new(IoInfraError(e)))
@@ -97,12 +100,18 @@ mod tests {
     #[derive(Debug)]
     struct Boom;
     impl fmt::Display for Boom {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "boom") }
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "boom")
+        }
     }
     impl std::error::Error for Boom {}
     impl DomainError for Boom {
-        fn error_code(&self) -> &str { "test.boom" }
-        fn http_status(&self) -> u16 { 500 }
+        fn error_code(&self) -> &str {
+            "test.boom"
+        }
+        fn http_status(&self) -> u16 {
+            500
+        }
     }
 
     #[test]

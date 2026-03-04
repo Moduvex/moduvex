@@ -10,8 +10,8 @@
 //! - Max total header block: 64 KB
 //! - Max header count: 100
 
-use crate::routing::method::Method;
 use crate::request::HttpVersion;
+use crate::routing::method::Method;
 
 // ── Limits ────────────────────────────────────────────────────────────────────
 
@@ -79,14 +79,14 @@ impl std::fmt::Display for ParseError {
 /// Lifetime `'buf` ties borrowed slices back to the original read buffer.
 #[derive(Debug)]
 pub struct ParsedHead<'buf> {
-    pub method:     Method,
-    pub path:       &'buf str,
-    pub query:      Option<&'buf str>,
-    pub version:    HttpVersion,
+    pub method: Method,
+    pub path: &'buf str,
+    pub query: Option<&'buf str>,
+    pub version: HttpVersion,
     /// `(name, value)` pairs. Names are raw (case-preserved) ASCII.
-    pub headers:    Vec<(&'buf str, &'buf [u8])>,
+    pub headers: Vec<(&'buf str, &'buf [u8])>,
     /// Total bytes consumed by the request line + headers (including final \r\n\r\n).
-    pub head_len:   usize,
+    pub head_len: usize,
     pub has_chunked_te: bool,
     pub content_length: Option<u64>,
 }
@@ -140,13 +140,15 @@ pub fn parse_request_head<'buf>(buf: &'buf [u8], limits: &ParseLimits) -> ParseS
     // ── Headers ───────────────────────────────────────────────────────────
     let mut headers: Vec<(&'buf str, &'buf [u8])> = Vec::with_capacity(16);
     let mut has_host = false;
-    let mut has_te   = false;
+    let mut has_te = false;
     let mut cl_value: Option<u64> = None;
     let mut multi_cl = false;
     let mut has_chunked_te = false;
 
     for line in lines {
-        if line.is_empty() { break; } // trailing CRLF guard
+        if line.is_empty() {
+            break;
+        } // trailing CRLF guard
 
         if headers.len() >= limits.max_header_count {
             return ParseStatus::Error(ParseError::TooManyHeaders);
@@ -168,7 +170,9 @@ pub fn parse_request_head<'buf>(buf: &'buf [u8], limits: &ParseLimits) -> ParseS
         let name_lower = name.to_ascii_lowercase();
 
         // Track Host presence.
-        if name_lower == "host" { has_host = true; }
+        if name_lower == "host" {
+            has_host = true;
+        }
 
         // Detect Transfer-Encoding.
         if name_lower == "transfer-encoding" {
@@ -184,7 +188,9 @@ pub fn parse_request_head<'buf>(buf: &'buf [u8], limits: &ParseLimits) -> ParseS
             match s.parse::<u64>() {
                 Ok(n) => {
                     if let Some(prev) = cl_value {
-                        if prev != n { multi_cl = true; }
+                        if prev != n {
+                            multi_cl = true;
+                        }
                     } else {
                         cl_value = Some(n);
                     }
@@ -228,15 +234,23 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
 
 /// Split `bytes` on `\r\n` and yield each line as `&[u8]`.
 fn split_crlf_lines(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
-    SplitCrlf { data: bytes, pos: 0 }
+    SplitCrlf {
+        data: bytes,
+        pos: 0,
+    }
 }
 
-struct SplitCrlf<'a> { data: &'a [u8], pos: usize }
+struct SplitCrlf<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
 
 impl<'a> Iterator for SplitCrlf<'a> {
     type Item = &'a [u8];
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.data.len() { return None; }
+        if self.pos >= self.data.len() {
+            return None;
+        }
         let rest = &self.data[self.pos..];
         match rest.windows(2).position(|w| w == b"\r\n") {
             Some(end) => {
@@ -254,18 +268,21 @@ impl<'a> Iterator for SplitCrlf<'a> {
 }
 
 /// Parse `"METHOD /path?query HTTP/1.x"`.
-fn parse_request_line<'buf>(
-    line: &'buf [u8],
-) -> Result<(Method, &'buf str, Option<&'buf str>, HttpVersion), ParseError> {
+fn parse_request_line(
+    line: &[u8],
+) -> Result<(Method, &str, Option<&str>, HttpVersion), ParseError> {
     // Method: up to first SP.
-    let sp1 = line.iter().position(|&b| b == b' ')
+    let sp1 = line
+        .iter()
+        .position(|&b| b == b' ')
         .ok_or(ParseError::BadRequestLine)?;
-    let method = Method::from_bytes(&line[..sp1])
-        .ok_or(ParseError::UnknownMethod)?;
+    let method = Method::from_bytes(&line[..sp1]).ok_or(ParseError::UnknownMethod)?;
 
     // URI: between SP1 and SP2.
     let rest = &line[sp1 + 1..];
-    let sp2 = rest.iter().position(|&b| b == b' ')
+    let sp2 = rest
+        .iter()
+        .position(|&b| b == b' ')
         .ok_or(ParseError::BadRequestLine)?;
     let uri_bytes = &rest[..sp2];
     let uri = std::str::from_utf8(uri_bytes).map_err(|_| ParseError::BadRequestLine)?;
@@ -273,7 +290,7 @@ fn parse_request_line<'buf>(
     // Split path and query.
     let (path, query) = match uri.find('?') {
         Some(q) => (&uri[..q], Some(&uri[q + 1..])),
-        None    => (uri, None),
+        None => (uri, None),
     };
 
     // Version: after SP2.
@@ -281,7 +298,7 @@ fn parse_request_line<'buf>(
     let version = match ver_bytes {
         b"HTTP/1.1" => HttpVersion::Http11,
         b"HTTP/1.0" => HttpVersion::Http10,
-        _           => return Err(ParseError::UnsupportedVersion),
+        _ => return Err(ParseError::UnsupportedVersion),
     };
 
     Ok((method, path, query, version))
@@ -289,7 +306,9 @@ fn parse_request_line<'buf>(
 
 /// Parse `"Name: value"` from a header line.
 fn parse_header_line(line: &[u8]) -> Result<(&str, &[u8]), ParseError> {
-    let colon = line.iter().position(|&b| b == b':')
+    let colon = line
+        .iter()
+        .position(|&b| b == b':')
         .ok_or(ParseError::BadHeader)?;
     let name_bytes = &line[..colon];
     // OWS after colon.
@@ -306,9 +325,20 @@ fn parse_header_line(line: &[u8]) -> Result<(&str, &[u8]), ParseError> {
 
 /// Strip leading and trailing ASCII whitespace (OWS = optional whitespace).
 fn trim_ows(b: &[u8]) -> &[u8] {
-    let start = b.iter().position(|&c| c != b' ' && c != b'\t').unwrap_or(b.len());
-    let end   = b.iter().rposition(|&c| c != b' ' && c != b'\t').map(|i| i + 1).unwrap_or(0);
-    if start >= end { b"" } else { &b[start..end] }
+    let start = b
+        .iter()
+        .position(|&c| c != b' ' && c != b'\t')
+        .unwrap_or(b.len());
+    let end = b
+        .iter()
+        .rposition(|&c| c != b' ' && c != b'\t')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    if start >= end {
+        b""
+    } else {
+        &b[start..end]
+    }
 }
 
 /// Check for forbidden bytes: NUL, CR, LF.
@@ -322,13 +352,15 @@ fn contains_forbidden(b: &[u8]) -> bool {
 mod tests {
     use super::*;
 
-    fn limits() -> ParseLimits { ParseLimits::default() }
+    fn limits() -> ParseLimits {
+        ParseLimits::default()
+    }
 
     fn complete(buf: &[u8]) -> ParsedHead<'_> {
         match parse_request_head(buf, &limits()) {
             ParseStatus::Complete(h) => h,
-            ParseStatus::Partial     => panic!("got Partial"),
-            ParseStatus::Error(e)    => panic!("got Error: {e:?}"),
+            ParseStatus::Partial => panic!("got Partial"),
+            ParseStatus::Error(e) => panic!("got Error: {e:?}"),
         }
     }
 
@@ -353,7 +385,10 @@ mod tests {
     #[test]
     fn partial_returns_partial() {
         let buf = b"GET / HTTP/1.1\r\nHost: x\r\n";
-        assert!(matches!(parse_request_head(buf, &limits()), ParseStatus::Partial));
+        assert!(matches!(
+            parse_request_head(buf, &limits()),
+            ParseStatus::Partial
+        ));
     }
 
     #[test]

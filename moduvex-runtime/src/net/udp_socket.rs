@@ -3,14 +3,14 @@
 //! `send_to` / `recv_from` return futures that resolve when the OS is ready
 //! to send or has data available, using the reactor's waker registry.
 
+use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
-use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate::reactor::source::{IoSource, next_token};
-use crate::platform::sys::{Interest, set_nonblocking};
+use crate::platform::sys::{set_nonblocking, Interest};
+use crate::reactor::source::{next_token, IoSource};
 
 // ── UdpSocket ─────────────────────────────────────────────────────────────────
 
@@ -40,7 +40,11 @@ impl UdpSocket {
     /// Return a future that sends `buf` to `target` and resolves to the number
     /// of bytes sent.
     pub fn send_to<'a>(&'a self, buf: &'a [u8], target: SocketAddr) -> SendToFuture<'a> {
-        SendToFuture { socket: self, buf, target }
+        SendToFuture {
+            socket: self,
+            buf,
+            target,
+        }
     }
 
     /// Return a future that receives a datagram into `buf` and resolves to
@@ -64,7 +68,7 @@ impl Drop for UdpSocket {
 /// Future returned by [`UdpSocket::send_to`].
 pub struct SendToFuture<'a> {
     socket: &'a UdpSocket,
-    buf:    &'a [u8],
+    buf: &'a [u8],
     target: SocketAddr,
 }
 
@@ -91,7 +95,7 @@ impl<'a> Future for SendToFuture<'a> {
 /// Future returned by [`UdpSocket::recv_from`].
 pub struct RecvFromFuture<'a> {
     socket: &'a UdpSocket,
-    buf:    &'a mut [u8],
+    buf: &'a mut [u8],
 }
 
 impl<'a> Future for RecvFromFuture<'a> {
@@ -152,7 +156,7 @@ fn try_send_to(fd: i32, buf: &[u8], target: SocketAddr) -> io::Result<usize> {
             fd,
             buf.as_ptr() as *const libc::c_void,
             buf.len(),
-            0,          // flags
+            0, // flags
             sa_ptr,
             sa_len,
         )
@@ -176,7 +180,7 @@ fn try_recv_from(fd: i32, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
             fd,
             buf.as_mut_ptr() as *mut libc::c_void,
             buf.len(),
-            0,          // flags
+            0, // flags
             &mut addr as *mut _ as *mut libc::sockaddr,
             &mut len,
         )
@@ -193,13 +197,7 @@ fn raw_local_addr(fd: i32) -> io::Result<SocketAddr> {
     let mut addr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
     let mut len = std::mem::size_of_val(&addr) as libc::socklen_t;
     // SAFETY: `fd` is a valid bound socket; `addr` buffer is large enough.
-    let rc = unsafe {
-        libc::getsockname(
-            fd,
-            &mut addr as *mut _ as *mut libc::sockaddr,
-            &mut len,
-        )
-    };
+    let rc = unsafe { libc::getsockname(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut len) };
     if rc == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -215,21 +213,31 @@ fn socketaddr_to_raw(addr: SocketAddr) -> (*const libc::sockaddr, libc::socklen_
             // SAFETY: zeroed() is a valid initial bit pattern; all fields set below.
             let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
             sin.sin_family = libc::AF_INET as libc::sa_family_t;
-            sin.sin_port   = v4.port().to_be();
-            sin.sin_addr   = libc::in_addr { s_addr: u32::from_be_bytes(octets).to_be() };
+            sin.sin_port = v4.port().to_be();
+            sin.sin_addr = libc::in_addr {
+                s_addr: u32::from_be_bytes(octets).to_be(),
+            };
             let ptr = Box::into_raw(Box::new(sin)) as *const libc::sockaddr;
-            (ptr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
+            (
+                ptr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            )
         }
         SocketAddr::V6(v6) => {
             // SAFETY: zeroed() is a valid initial bit pattern; all fields set below.
             let mut sin6: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
-            sin6.sin6_family   = libc::AF_INET6 as libc::sa_family_t;
-            sin6.sin6_port     = v6.port().to_be();
+            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+            sin6.sin6_port = v6.port().to_be();
             sin6.sin6_flowinfo = v6.flowinfo();
-            sin6.sin6_addr     = libc::in6_addr { s6_addr: v6.ip().octets() };
+            sin6.sin6_addr = libc::in6_addr {
+                s6_addr: v6.ip().octets(),
+            };
             sin6.sin6_scope_id = v6.scope_id();
             let ptr = Box::into_raw(Box::new(sin6)) as *const libc::sockaddr;
-            (ptr, std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t)
+            (
+                ptr,
+                std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+            )
         }
     }
 }
@@ -256,15 +264,18 @@ fn sockaddr_to_socketaddr(
             // the buffer as sockaddr_in is valid because the layouts are compatible.
             let v4: &libc::sockaddr_in =
                 unsafe { &*(addr as *const _ as *const libc::sockaddr_in) };
-            let ip   = std::net::Ipv4Addr::from(u32::from_be(v4.sin_addr.s_addr));
+            let ip = std::net::Ipv4Addr::from(u32::from_be(v4.sin_addr.s_addr));
             let port = u16::from_be(v4.sin_port);
             Ok(SocketAddr::V4(std::net::SocketAddrV4::new(ip, port)))
         }
         libc::AF_INET6 if len >= std::mem::size_of::<libc::sockaddr_in6>() as u32 => {
-            let ip   = std::net::Ipv6Addr::from(addr.sin6_addr.s6_addr);
+            let ip = std::net::Ipv6Addr::from(addr.sin6_addr.s6_addr);
             let port = u16::from_be(addr.sin6_port);
             Ok(SocketAddr::V6(std::net::SocketAddrV6::new(
-                ip, port, addr.sin6_flowinfo, addr.sin6_scope_id,
+                ip,
+                port,
+                addr.sin6_flowinfo,
+                addr.sin6_scope_id,
             )))
         }
         _ => Err(io::Error::new(
@@ -283,8 +294,7 @@ mod tests {
 
     #[test]
     fn bind_and_local_addr() {
-        let sock = UdpSocket::bind("127.0.0.1:0".parse().unwrap())
-            .expect("bind failed");
+        let sock = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).expect("bind failed");
         let addr = sock.local_addr().expect("local_addr failed");
         assert_eq!(addr.ip().to_string(), "127.0.0.1");
         assert!(addr.port() > 0);

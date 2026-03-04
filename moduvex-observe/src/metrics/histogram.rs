@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(snap[3].1, 1); // le=0.5: 1 (0.042)
         assert_eq!(snap[4].1, 2); // le=1.0: 2 (0.042 + 0.8)
         assert_eq!(snap[5].1, 3); // le=5.0: 3 (all)
-        // +Inf bucket = 3 (always incremented)
+                                  // +Inf bucket = 3 (always incremented)
         assert_eq!(snap[6].1, 3);
     }
 

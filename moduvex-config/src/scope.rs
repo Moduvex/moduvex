@@ -3,9 +3,9 @@
 //! Extracts a TOML section by key, deserializes into the target type,
 //! and wraps in `Arc<T>` for DI injection.
 
-use std::sync::Arc;
-use serde::de::DeserializeOwned;
 use crate::error::ConfigError;
+use serde::de::DeserializeOwned;
+use std::sync::Arc;
 
 /// Extract a section from the root TOML value and deserialize into `T`.
 ///
@@ -20,12 +20,13 @@ pub fn extract_section<T: DeserializeOwned>(
             section: section.to_string(),
         })?;
 
-    let typed: T = section_val.clone().try_into().map_err(|e: toml::de::Error| {
-        ConfigError::Deserialize {
+    let typed: T = section_val
+        .clone()
+        .try_into()
+        .map_err(|e: toml::de::Error| ConfigError::Deserialize {
             section: section.to_string(),
             source: e.to_string(),
-        }
-    })?;
+        })?;
 
     Ok(Arc::new(typed))
 }
@@ -43,8 +44,9 @@ mod tests {
 
     #[test]
     fn extract_valid_section() {
-        let root: toml::Value =
-            "[server]\nport = 8080\nhost = \"localhost\"\n".parse().unwrap();
+        let root: toml::Value = "[server]\nport = 8080\nhost = \"localhost\"\n"
+            .parse()
+            .unwrap();
         let cfg: Arc<ServerConfig> = extract_section(&root, "server").unwrap();
         assert_eq!(cfg.port, 8080);
         assert_eq!(cfg.host, "localhost");

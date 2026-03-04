@@ -48,7 +48,11 @@ mod tests {
                     message: "must be > 0".into(),
                 });
             }
-            if errors.is_empty() { Ok(()) } else { Err(errors) }
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(errors)
+            }
         }
     }
 
@@ -68,7 +72,10 @@ mod tests {
 
     #[test]
     fn validation_error_display() {
-        let e = ValidationError { field: "host".into(), message: "cannot be empty".into() };
+        let e = ValidationError {
+            field: "host".into(),
+            message: "cannot be empty".into(),
+        };
         assert_eq!(e.to_string(), "config validation: host: cannot be empty");
     }
 }

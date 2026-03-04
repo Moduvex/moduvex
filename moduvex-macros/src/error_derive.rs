@@ -6,7 +6,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, Fields, Meta, Expr, Lit};
+use syn::{DeriveInput, Expr, Fields, Lit, Meta};
 
 use crate::utils;
 
@@ -174,10 +174,7 @@ pub fn expand_infra(input: TokenStream) -> darling::Result<TokenStream> {
 
 /// Generate a match pattern for a variant, ignoring field bindings.
 /// Unit: `Variant`, Unnamed: `Variant(..)`, Named: `Variant { .. }`.
-fn variant_match_pattern(
-    vname: &syn::Ident,
-    fields: &Fields,
-) -> TokenStream {
+fn variant_match_pattern(vname: &syn::Ident, fields: &Fields) -> TokenStream {
     match fields {
         Fields::Unit => quote!(#vname),
         Fields::Unnamed(_) => quote!(#vname(..)),
@@ -186,9 +183,7 @@ fn variant_match_pattern(
 }
 
 /// Parse `#[error(code = "...", status = NNN)]` from a variant's attributes.
-fn parse_domain_attrs(
-    variant: &syn::Variant,
-) -> darling::Result<DomainVariantAttrs> {
+fn parse_domain_attrs(variant: &syn::Variant) -> darling::Result<DomainVariantAttrs> {
     let mut code: Option<String> = None;
     let mut status: Option<u16> = None;
 
@@ -197,9 +192,7 @@ fn parse_domain_attrs(
             continue;
         }
         let nested = attr
-            .parse_args_with(
-                syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-            )
+            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
             .map_err(|e| darling::Error::custom(e.to_string()).with_span(attr))?;
 
         for meta in &nested {
@@ -214,13 +207,10 @@ fn parse_domain_attrs(
                 Meta::NameValue(nv) if nv.path.is_ident("status") => {
                     if let Expr::Lit(expr_lit) = &nv.value {
                         if let Lit::Int(i) = &expr_lit.lit {
-                            status = Some(
-                                i.base10_parse::<u16>()
-                                    .map_err(|e| {
-                                        darling::Error::custom(e.to_string())
-                                            .with_span(i)
-                                    })?,
-                            );
+                            status =
+                                Some(i.base10_parse::<u16>().map_err(|e| {
+                                    darling::Error::custom(e.to_string()).with_span(i)
+                                })?);
                         }
                     }
                 }
@@ -229,20 +219,15 @@ fn parse_domain_attrs(
         }
     }
 
-    let code = code.ok_or_else(|| {
-        darling::Error::missing_field("code").with_span(variant)
-    })?;
-    let status = status.ok_or_else(|| {
-        darling::Error::missing_field("status").with_span(variant)
-    })?;
+    let code = code.ok_or_else(|| darling::Error::missing_field("code").with_span(variant))?;
+    let status =
+        status.ok_or_else(|| darling::Error::missing_field("status").with_span(variant))?;
 
     Ok(DomainVariantAttrs { code, status })
 }
 
 /// Parse `#[error(retryable = true/false)]` from a variant's attributes.
-fn parse_infra_attrs(
-    variant: &syn::Variant,
-) -> darling::Result<InfraVariantAttrs> {
+fn parse_infra_attrs(variant: &syn::Variant) -> darling::Result<InfraVariantAttrs> {
     let mut retryable: Option<bool> = None;
 
     for attr in &variant.attrs {
@@ -250,9 +235,7 @@ fn parse_infra_attrs(
             continue;
         }
         let nested = attr
-            .parse_args_with(
-                syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-            )
+            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
             .map_err(|e| darling::Error::custom(e.to_string()).with_span(attr))?;
 
         for meta in &nested {

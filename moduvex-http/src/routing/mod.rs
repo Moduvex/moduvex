@@ -5,5 +5,5 @@ pub mod path;
 pub mod router;
 
 pub use method::Method;
-pub use path::{PathSegment, match_path, parse_pattern};
-pub use router::{BoxHandler, Router, RouteMatch};
+pub use path::{match_path, parse_pattern, PathSegment};
+pub use router::{BoxHandler, RouteMatch, Router};

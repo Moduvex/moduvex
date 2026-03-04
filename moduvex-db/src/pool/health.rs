@@ -36,8 +36,8 @@ impl HealthMonitorConfig {
 /// This is called by the background loop (see `spawn_health_monitor`).
 pub async fn run_health_sweep(pool: &Arc<ConnectionPool>) {
     let idle_timeout = pool.config().idle_timeout;
-    let min_idle    = pool.config().min_idle;
-    let now         = Instant::now();
+    let min_idle = pool.config().min_idle;
+    let now = Instant::now();
 
     // ── Step 1 & 2: drain idle list, filter out stale and dead connections ──
     let to_check: Vec<_> = {
@@ -78,7 +78,7 @@ pub async fn run_health_sweep(pool: &Arc<ConnectionPool>) {
     // ── Step 4: create connections to reach min_idle ─────────────────────
     let current_idle = pool.idle_count().await;
     let current_live = pool.live_count().await;
-    let max_size     = pool.config().max_size;
+    let max_size = pool.config().max_size;
 
     if current_idle < min_idle && current_live < max_size {
         let needed = (min_idle - current_idle).min(max_size - current_live);

@@ -6,19 +6,16 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{ItemFn, Expr, Lit, Meta};
+use syn::{Expr, ItemFn, Lit, Meta};
 
 /// Expand `#[moduvex::main]` or `#[moduvex::main(threads = N)]`.
-pub fn expand(
-    args: TokenStream,
-    item: TokenStream,
-) -> syn::Result<TokenStream> {
+pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let func: ItemFn = syn::parse2(item)?;
 
     // Validate: must be async
     if func.sig.asyncness.is_none() {
         return Err(syn::Error::new_spanned(
-            &func.sig.fn_token,
+            func.sig.fn_token,
             "#[moduvex::main] requires an async fn",
         ));
     }
@@ -76,10 +73,7 @@ fn parse_threads_arg(args: TokenStream) -> syn::Result<Option<usize>> {
                 if let Lit::Int(i) = &expr_lit.lit {
                     let n = i.base10_parse::<usize>()?;
                     if n == 0 {
-                        return Err(syn::Error::new_spanned(
-                            i,
-                            "threads must be > 0",
-                        ));
+                        return Err(syn::Error::new_spanned(i, "threads must be > 0"));
                     }
                     return Ok(Some(n));
                 }
@@ -89,9 +83,6 @@ fn parse_threads_arg(args: TokenStream) -> syn::Result<Option<usize>> {
                 "expected integer for threads",
             ))
         }
-        other => Err(syn::Error::new_spanned(
-            other,
-            "expected `threads = N`",
-        )),
+        other => Err(syn::Error::new_spanned(other, "expected `threads = N`")),
     }
 }

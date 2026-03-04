@@ -30,9 +30,7 @@ pub trait DatabaseProtocol: Send + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<u64>> + Send + 'a>>;
 
     /// Ping the server to verify liveness.
-    fn ping<'a>(
-        &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+    fn ping<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 }
 
 impl DatabaseProtocol for postgres::PgConnection {
@@ -50,9 +48,7 @@ impl DatabaseProtocol for postgres::PgConnection {
         Box::pin(self.execute(sql))
     }
 
-    fn ping<'a>(
-        &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    fn ping<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(self.ping())
     }
 }

@@ -6,8 +6,8 @@
 
 pub mod isolation;
 
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
 
 use crate::error::{DbError, Result};
 use crate::protocol::postgres::PgConnection;
@@ -34,26 +34,20 @@ enum TransactionState {
 /// within the synchronous `Drop` impl (fires a raw TCP write). For clean
 /// async rollback, call `rollback().await` explicitly before dropping.
 pub struct Transaction {
-    conn:      Option<PgConnection>,
-    state:     TransactionState,
+    conn: Option<PgConnection>,
+    state: TransactionState,
     isolation: IsolationLevel,
 }
 
 impl Transaction {
     /// Begin a transaction on `conn` with the given isolation level.
-    pub async fn begin(
-        conn: PgConnection,
-        isolation: IsolationLevel,
-    ) -> Result<Self> {
+    pub async fn begin(conn: PgConnection, isolation: IsolationLevel) -> Result<Self> {
         let mut tx = Transaction {
-            conn:  Some(conn),
+            conn: Some(conn),
             state: TransactionState::Active,
             isolation,
         };
-        let begin_sql = format!(
-            "BEGIN ISOLATION LEVEL {}",
-            isolation.as_sql()
-        );
+        let begin_sql = format!("BEGIN ISOLATION LEVEL {}", isolation.as_sql());
         tx.conn_mut()?.execute(&begin_sql).await?;
         Ok(tx)
     }
@@ -83,10 +77,14 @@ impl Transaction {
     }
 
     /// Return the isolation level of this transaction.
-    pub fn isolation_level(&self) -> IsolationLevel { self.isolation }
+    pub fn isolation_level(&self) -> IsolationLevel {
+        self.isolation
+    }
 
     /// Return whether the transaction is still active.
-    pub fn is_active(&self) -> bool { self.state == TransactionState::Active }
+    pub fn is_active(&self) -> bool {
+        self.state == TransactionState::Active
+    }
 
     fn conn_mut(&mut self) -> Result<&mut PgConnection> {
         self.conn.as_mut().ok_or(DbError::TransactionConsumed)
@@ -137,10 +135,18 @@ impl moduvex_core::TransactionBoundary for PoolTransactionBoundary {
         &'a self,
     ) -> Pin<Box<dyn Future<Output = moduvex_core::error::Result<TxHandle>> + Send + 'a>> {
         Box::pin(async move {
-            let conn = self.pool.acquire().await
-                .map_err(|e| moduvex_core::error::ModuvexError::Other(Box::new(crate::error::OtherError(e.to_string()))))?;
-            let tx = Transaction::begin(conn, IsolationLevel::ReadCommitted).await
-                .map_err(|e| moduvex_core::error::ModuvexError::Other(Box::new(crate::error::OtherError(e.to_string()))))?;
+            let conn = self.pool.acquire().await.map_err(|e| {
+                moduvex_core::error::ModuvexError::Other(Box::new(crate::error::OtherError(
+                    e.to_string(),
+                )))
+            })?;
+            let tx = Transaction::begin(conn, IsolationLevel::ReadCommitted)
+                .await
+                .map_err(|e| {
+                    moduvex_core::error::ModuvexError::Other(Box::new(crate::error::OtherError(
+                        e.to_string(),
+                    )))
+                })?;
             Ok(TxHandle { tx })
         })
     }
@@ -150,8 +156,11 @@ impl moduvex_core::TransactionBoundary for PoolTransactionBoundary {
         handle: TxHandle,
     ) -> Pin<Box<dyn Future<Output = moduvex_core::error::Result<()>> + Send + 'a>> {
         Box::pin(async move {
-            let conn = handle.tx.commit().await
-                .map_err(|e| moduvex_core::error::ModuvexError::Other(Box::new(crate::error::OtherError(e.to_string()))))?;
+            let conn = handle.tx.commit().await.map_err(|e| {
+                moduvex_core::error::ModuvexError::Other(Box::new(crate::error::OtherError(
+                    e.to_string(),
+                )))
+            })?;
             self.pool.release(conn).await;
             Ok(())
         })
@@ -162,8 +171,11 @@ impl moduvex_core::TransactionBoundary for PoolTransactionBoundary {
         handle: TxHandle,
     ) -> Pin<Box<dyn Future<Output = moduvex_core::error::Result<()>> + Send + 'a>> {
         Box::pin(async move {
-            let conn = handle.tx.rollback().await
-                .map_err(|e| moduvex_core::error::ModuvexError::Other(Box::new(crate::error::OtherError(e.to_string()))))?;
+            let conn = handle.tx.rollback().await.map_err(|e| {
+                moduvex_core::error::ModuvexError::Other(Box::new(crate::error::OtherError(
+                    e.to_string(),
+                )))
+            })?;
             self.pool.release(conn).await;
             Ok(())
         })

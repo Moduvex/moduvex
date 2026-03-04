@@ -108,7 +108,9 @@ mod tests {
     struct DummyModule;
 
     impl Module for DummyModule {
-        fn name(&self) -> &'static str { "dummy" }
+        fn name(&self) -> &'static str {
+            "dummy"
+        }
     }
 
     #[test]
@@ -120,8 +122,12 @@ mod tests {
 
     struct HighPriorityModule;
     impl Module for HighPriorityModule {
-        fn name(&self) -> &'static str { "high" }
-        fn priority(&self) -> i32 { 100 }
+        fn name(&self) -> &'static str {
+            "high"
+        }
+        fn priority(&self) -> i32 {
+            100
+        }
     }
 
     #[test]

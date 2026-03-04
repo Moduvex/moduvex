@@ -25,7 +25,9 @@ pub struct ShutdownConfig {
 
 impl Default for ShutdownConfig {
     fn default() -> Self {
-        Self { drain_timeout: Duration::from_secs(30) }
+        Self {
+            drain_timeout: Duration::from_secs(30),
+        }
     }
 }
 
@@ -44,7 +46,9 @@ pub struct ShutdownHandle {
 impl ShutdownHandle {
     /// Create a new, unset handle.
     pub fn new() -> Self {
-        Self { requested: Arc::new(AtomicBool::new(false)) }
+        Self {
+            requested: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     /// Signal that shutdown should begin.
@@ -73,10 +77,10 @@ pub async fn wait_for_shutdown(handle: &ShutdownHandle) {
 
     #[cfg(unix)]
     {
-        use moduvex_runtime::signal::{SignalKind, signal};
+        use moduvex_runtime::signal::{signal, SignalKind};
 
         // Set up SIGINT + SIGTERM listeners.
-        let sigint  = signal(SignalKind::Interrupt).ok();
+        let sigint = signal(SignalKind::Interrupt).ok();
         let sigterm = signal(SignalKind::Terminate).ok();
 
         // Poll both signals and the programmatic handle concurrently.
@@ -93,7 +97,7 @@ pub async fn wait_for_shutdown(handle: &ShutdownHandle) {
             // Simplest correct approach: yield to the executor each iteration.
             // The signal futures park the task via their internal wakers,
             // so this loop only burns CPU when actually woken up.
-            if let Some(ref _s) = sigint  { /* signal will wake the task */ }
+            if let Some(ref _s) = sigint { /* signal will wake the task */ }
             if let Some(ref _s) = sigterm { /* signal will wake the task */ }
 
             // Yield to the executor so it can poll signal futures.

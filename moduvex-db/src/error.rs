@@ -46,22 +46,30 @@ pub enum DbError {
 impl fmt::Display for DbError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DbError::Io(e)            => write!(f, "I/O error: {e}"),
-            DbError::ServerError { code, message, detail } => {
+            DbError::Io(e) => write!(f, "I/O error: {e}"),
+            DbError::ServerError {
+                code,
+                message,
+                detail,
+            } => {
                 write!(f, "PostgreSQL error [{code}]: {message}")?;
-                if let Some(d) = detail { write!(f, " — {d}")?; }
+                if let Some(d) = detail {
+                    write!(f, " — {d}")?;
+                }
                 Ok(())
             }
-            DbError::AuthFailed(msg)        => write!(f, "authentication failed: {msg}"),
-            DbError::UnsupportedAuth(m)     => write!(f, "unsupported auth method: {m}"),
-            DbError::Protocol(msg)          => write!(f, "protocol error: {msg}"),
-            DbError::PoolTimeout            => write!(f, "connection pool timeout"),
-            DbError::PoolClosed             => write!(f, "connection pool is closed"),
-            DbError::TypeMismatch(msg)      => write!(f, "type mismatch: {msg}"),
-            DbError::Migration(msg)         => write!(f, "migration error: {msg}"),
-            DbError::TransactionConsumed    => write!(f, "transaction already committed or rolled back"),
-            DbError::NullValue { column }   => write!(f, "null value in column '{column}'"),
-            DbError::Other(msg)             => write!(f, "{msg}"),
+            DbError::AuthFailed(msg) => write!(f, "authentication failed: {msg}"),
+            DbError::UnsupportedAuth(m) => write!(f, "unsupported auth method: {m}"),
+            DbError::Protocol(msg) => write!(f, "protocol error: {msg}"),
+            DbError::PoolTimeout => write!(f, "connection pool timeout"),
+            DbError::PoolClosed => write!(f, "connection pool is closed"),
+            DbError::TypeMismatch(msg) => write!(f, "type mismatch: {msg}"),
+            DbError::Migration(msg) => write!(f, "migration error: {msg}"),
+            DbError::TransactionConsumed => {
+                write!(f, "transaction already committed or rolled back")
+            }
+            DbError::NullValue { column } => write!(f, "null value in column '{column}'"),
+            DbError::Other(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -76,7 +84,9 @@ impl std::error::Error for DbError {
 }
 
 impl From<io::Error> for DbError {
-    fn from(e: io::Error) -> Self { DbError::Io(e) }
+    fn from(e: io::Error) -> Self {
+        DbError::Io(e)
+    }
 }
 
 /// Convenience alias.
@@ -89,7 +99,9 @@ pub type Result<T> = std::result::Result<T, DbError>;
 pub struct OtherError(pub String);
 
 impl fmt::Display for OtherError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 impl std::error::Error for OtherError {}
@@ -128,7 +140,9 @@ mod tests {
 
     #[test]
     fn null_value_display() {
-        let e = DbError::NullValue { column: "email".into() };
+        let e = DbError::NullValue {
+            column: "email".into(),
+        };
         assert!(e.to_string().contains("email"));
     }
 }

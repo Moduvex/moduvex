@@ -25,13 +25,13 @@ impl Param {
     /// Returns `None` for `Null` (will be rendered as `NULL` literal in SQL).
     pub fn encode_text(&self) -> Option<String> {
         match self {
-            Param::Null       => None,
-            Param::Bool(b)    => Some(if *b { "t".into() } else { "f".into() }),
-            Param::Int4(n)    => Some(n.to_string()),
-            Param::Int8(n)    => Some(n.to_string()),
-            Param::Float8(f)  => Some(f.to_string()),
-            Param::Text(s)    => Some(s.clone()),
-            Param::Bytes(b)   => Some(hex_encode(b)),
+            Param::Null => None,
+            Param::Bool(b) => Some(if *b { "t".into() } else { "f".into() }),
+            Param::Int4(n) => Some(n.to_string()),
+            Param::Int8(n) => Some(n.to_string()),
+            Param::Float8(f) => Some(f.to_string()),
+            Param::Text(s) => Some(s.clone()),
+            Param::Bytes(b) => Some(hex_encode(b)),
         }
     }
 
@@ -42,13 +42,19 @@ impl Param {
     /// SQL string (avoiding the extended query protocol for MVP).
     pub fn to_sql_literal(&self) -> String {
         match self {
-            Param::Null      => "NULL".into(),
-            Param::Bool(b)   => if *b { "TRUE".into() } else { "FALSE".into() },
-            Param::Int4(n)   => n.to_string(),
-            Param::Int8(n)   => n.to_string(),
+            Param::Null => "NULL".into(),
+            Param::Bool(b) => {
+                if *b {
+                    "TRUE".into()
+                } else {
+                    "FALSE".into()
+                }
+            }
+            Param::Int4(n) => n.to_string(),
+            Param::Int8(n) => n.to_string(),
             Param::Float8(f) => f.to_string(),
-            Param::Text(s)   => format!("'{}'", s.replace('\'', "''")),
-            Param::Bytes(b)  => format!("'\\x{}'", hex_encode(b)),
+            Param::Text(s) => format!("'{}'", s.replace('\'', "''")),
+            Param::Bytes(b) => format!("'\\x{}'", hex_encode(b)),
         }
     }
 }
@@ -65,20 +71,52 @@ pub trait ToParam {
     fn to_param(&self) -> Param;
 }
 
-impl ToParam for bool    { fn to_param(&self) -> Param { Param::Bool(*self) } }
-impl ToParam for i32     { fn to_param(&self) -> Param { Param::Int4(*self) } }
-impl ToParam for i64     { fn to_param(&self) -> Param { Param::Int8(*self) } }
-impl ToParam for f64     { fn to_param(&self) -> Param { Param::Float8(*self) } }
-impl ToParam for String  { fn to_param(&self) -> Param { Param::Text(self.clone()) } }
-impl ToParam for str     { fn to_param(&self) -> Param { Param::Text(self.to_owned()) } }
-impl ToParam for Vec<u8> { fn to_param(&self) -> Param { Param::Bytes(self.clone()) } }
-impl ToParam for &str    { fn to_param(&self) -> Param { Param::Text((*self).to_owned()) } }
+impl ToParam for bool {
+    fn to_param(&self) -> Param {
+        Param::Bool(*self)
+    }
+}
+impl ToParam for i32 {
+    fn to_param(&self) -> Param {
+        Param::Int4(*self)
+    }
+}
+impl ToParam for i64 {
+    fn to_param(&self) -> Param {
+        Param::Int8(*self)
+    }
+}
+impl ToParam for f64 {
+    fn to_param(&self) -> Param {
+        Param::Float8(*self)
+    }
+}
+impl ToParam for String {
+    fn to_param(&self) -> Param {
+        Param::Text(self.clone())
+    }
+}
+impl ToParam for str {
+    fn to_param(&self) -> Param {
+        Param::Text(self.to_owned())
+    }
+}
+impl ToParam for Vec<u8> {
+    fn to_param(&self) -> Param {
+        Param::Bytes(self.clone())
+    }
+}
+impl ToParam for &str {
+    fn to_param(&self) -> Param {
+        Param::Text((*self).to_owned())
+    }
+}
 
 impl<T: ToParam> ToParam for Option<T> {
     fn to_param(&self) -> Param {
         match self {
             Some(v) => v.to_param(),
-            None    => Param::Null,
+            None => Param::Null,
         }
     }
 }
@@ -106,7 +144,8 @@ pub fn substitute_params(sql: &str, params: &[Param]) -> Result<String> {
             let idx: usize = idx_str.parse().unwrap(); // safe: only digits
             if idx == 0 || idx > params.len() {
                 return Err(DbError::Other(format!(
-                    "parameter ${idx} out of range (have {} params)", params.len()
+                    "parameter ${idx} out of range (have {} params)",
+                    params.len()
                 )));
             }
             result.push_str(&params[idx - 1].to_sql_literal());
@@ -128,11 +167,11 @@ mod tests {
 
     #[test]
     fn param_encode_text() {
-        assert_eq!(Param::Bool(true).encode_text(),  Some("t".into()));
+        assert_eq!(Param::Bool(true).encode_text(), Some("t".into()));
         assert_eq!(Param::Bool(false).encode_text(), Some("f".into()));
-        assert_eq!(Param::Int4(42).encode_text(),    Some("42".into()));
-        assert_eq!(Param::Int8(-1).encode_text(),    Some("-1".into()));
-        assert_eq!(Param::Float8(3.14).encode_text(),Some("3.14".into()));
+        assert_eq!(Param::Int4(42).encode_text(), Some("42".into()));
+        assert_eq!(Param::Int8(-1).encode_text(), Some("-1".into()));
+        assert_eq!(Param::Float8(2.72).encode_text(), Some("2.72".into()));
         assert_eq!(Param::Text("hi".into()).encode_text(), Some("hi".into()));
         assert_eq!(Param::Null.encode_text(), None);
     }
@@ -158,7 +197,7 @@ mod tests {
     fn to_param_implementations() {
         assert_eq!(42i32.to_param(), Param::Int4(42));
         assert_eq!((-1i64).to_param(), Param::Int8(-1));
-        assert_eq!(3.14f64.to_param(), Param::Float8(3.14));
+        assert_eq!(2.72f64.to_param(), Param::Float8(2.72));
         assert_eq!("hello".to_param(), Param::Text("hello".into()));
         assert_eq!(true.to_param(), Param::Bool(true));
         let opt: Option<i32> = None;

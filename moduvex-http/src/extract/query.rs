@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use crate::request::Request;
 use crate::response::Response;
-use crate::status::StatusCode;
 
 use super::FromRequest;
 
@@ -56,12 +55,14 @@ fn percent_decode(input: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'+' => { out.push(b' '); i += 1; }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
             b'%' if i + 2 < bytes.len() => {
-                if let Ok(byte) = u8::from_str_radix(
-                    std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                    16,
-                ) {
+                if let Ok(byte) =
+                    u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+                {
                     out.push(byte);
                     i += 3;
                 } else {
@@ -69,7 +70,10 @@ fn percent_decode(input: &str) -> String {
                     i += 1;
                 }
             }
-            ch => { out.push(ch); i += 1; }
+            ch => {
+                out.push(ch);
+                i += 1;
+            }
         }
     }
     String::from_utf8(out).unwrap_or_default()

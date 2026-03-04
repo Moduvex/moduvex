@@ -81,8 +81,7 @@ pub struct FnMiddleware<F>(pub F);
 
 impl<F> Middleware for FnMiddleware<F>
 where
-    F: Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>>
-        + Send + Sync + 'static,
+    F: Fn(Request, Next) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync + 'static,
 {
     fn handle(&self, req: Request, next: Next) -> Pin<Box<dyn Future<Output = Response> + Send>> {
         (self.0)(req, next)
@@ -97,7 +96,11 @@ mod tests {
     struct AddHeader;
 
     impl Middleware for AddHeader {
-        fn handle(&self, req: Request, next: Next) -> Pin<Box<dyn Future<Output = Response> + Send>> {
+        fn handle(
+            &self,
+            req: Request,
+            next: Next,
+        ) -> Pin<Box<dyn Future<Output = Response> + Send>> {
             Box::pin(async move {
                 let mut resp = next.run(req).await;
                 resp.headers.insert("x-test", b"added".to_vec());
@@ -108,13 +111,16 @@ mod tests {
 
     #[test]
     fn middleware_chain_runs() {
-        let handler: BoxHandler = Box::new(|_req| {
-            Box::pin(async { Response::new(StatusCode::OK) })
-        });
+        let handler: BoxHandler =
+            Box::new(|_req| Box::pin(async { Response::new(StatusCode::OK) }));
         let mws: Arc<Vec<Arc<dyn Middleware>>> = Arc::new(vec![Arc::new(AddHeader)]);
         let handler = Arc::new(handler);
 
         // Verify the chain builds without panic (full async test requires runtime)
-        let _next = Next { middlewares: mws, idx: 0, handler };
+        let _next = Next {
+            middlewares: mws,
+            idx: 0,
+            handler,
+        };
     }
 }

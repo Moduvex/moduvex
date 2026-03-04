@@ -43,11 +43,7 @@ pub trait ContainsModule<M, Proof> {}
 impl<M, Rest> ContainsModule<M, Here> for (M, Rest) {}
 
 // Recursive case: M is somewhere in the tail.
-impl<M, Head, Rest, P> ContainsModule<M, There<P>> for (Head, Rest)
-where
-    Rest: ContainsModule<M, P>,
-{
-}
+impl<M, Head, Rest, P> ContainsModule<M, There<P>> for (Head, Rest) where Rest: ContainsModule<M, P> {}
 
 // ── DependsOn ─────────────────────────────────────────────────────────────────
 
@@ -76,8 +72,8 @@ pub trait ContainsAll<Required, Proofs> {}
 
 impl<List> ContainsAll<(), ()> for List {}
 
-impl<List, Head, HeadProof, Tail, TailProofs>
-    ContainsAll<(Head, Tail), (HeadProof, TailProofs)> for List
+impl<List, Head, HeadProof, Tail, TailProofs> ContainsAll<(Head, Tail), (HeadProof, TailProofs)>
+    for List
 where
     List: ContainsModule<Head, HeadProof>,
     List: ContainsAll<Tail, TailProofs>,
@@ -119,33 +115,51 @@ mod tests {
     struct ModB;
     struct ModC;
 
-    impl DependsOn for ModA { type Required = (); }
-    impl DependsOn for ModB { type Required = (ModA, ()); }
-    impl DependsOn for ModC { type Required = (ModA, (ModB, ())); }
+    impl DependsOn for ModA {
+        type Required = ();
+    }
+    impl DependsOn for ModB {
+        type Required = (ModA, ());
+    }
+    impl DependsOn for ModC {
+        type Required = (ModA, (ModB, ()));
+    }
 
-    fn assert_ok<L, P>() where L: AllDepsOk<P> {}
+    fn assert_ok<L, P>()
+    where
+        L: AllDepsOk<P>,
+    {
+    }
 
     #[test]
     fn empty_list_ok() {
-        fn check() { assert_ok::<(), ()>(); }
+        fn check() {
+            assert_ok::<(), ()>();
+        }
         check();
     }
 
     #[test]
     fn single_no_dep_ok() {
-        fn check() { assert_ok::<(ModA, ()), _>(); }
+        fn check() {
+            assert_ok::<(ModA, ()), _>();
+        }
         check();
     }
 
     #[test]
     fn two_modules_with_dep_ok() {
-        fn check() { assert_ok::<(ModB, (ModA, ())), _>(); }
+        fn check() {
+            assert_ok::<(ModB, (ModA, ())), _>();
+        }
         check();
     }
 
     #[test]
     fn three_modules_multi_dep_ok() {
-        fn check() { assert_ok::<(ModC, (ModB, (ModA, ()))), _>(); }
+        fn check() {
+            assert_ok::<(ModC, (ModB, (ModA, ()))), _>();
+        }
         check();
     }
 }

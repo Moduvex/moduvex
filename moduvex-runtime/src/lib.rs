@@ -1,3 +1,4 @@
+#![allow(dead_code)] // Internal framework APIs — used by downstream crates
 //! moduvex-runtime — Custom async runtime for the Moduvex framework.
 //!
 //! Provides a cross-platform async runtime with:
@@ -9,19 +10,19 @@
 //! - Signal handling
 //! - Task-local storage
 
+pub mod executor;
+pub mod net;
 pub mod platform;
 pub mod reactor;
-pub mod executor;
-pub mod time;
-pub mod net;
-pub mod sync;
-pub mod signal;
 pub mod runtime;
+pub mod signal;
+pub mod sync;
+pub mod time;
 
 // ── Core re-exports ──────────────────────────────────────────────────────────
 
-pub use executor::task::{JoinHandle, JoinError};
-pub use executor::task_local::{TaskLocal, AccessError};
+pub use executor::task::{JoinError, JoinHandle};
+pub use executor::task_local::{AccessError, TaskLocal};
 pub use runtime::{Runtime, RuntimeBuilder};
 
 // ── Networking re-exports ────────────────────────────────────────────────────

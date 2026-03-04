@@ -10,8 +10,8 @@
 //! | `Mutex`   | [`mutex`] | Async mutex with FIFO waiter queue               |
 
 pub mod mpsc;
-pub mod oneshot;
 pub mod mutex;
+pub mod oneshot;
 
 pub use mutex::{Mutex, MutexGuard};
 pub use oneshot::RecvError;

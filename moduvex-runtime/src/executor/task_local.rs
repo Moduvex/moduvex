@@ -45,7 +45,9 @@ impl<T: 'static> TaskLocal<T> {
     /// Internal constructor — use [`task_local!`] instead.
     #[doc(hidden)]
     pub const fn new() -> Self {
-        Self { _marker: PhantomData }
+        Self {
+            _marker: PhantomData,
+        }
     }
 
     /// Address-based key for the thread-local HashMap.
@@ -176,7 +178,7 @@ macro_rules! task_local {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
     use crate::executor::{block_on, block_on_with_spawn, spawn};
 
     task_local! {
@@ -189,7 +191,8 @@ mod tests {
         block_on(async {
             FOO.scope(42, async {
                 FOO.with(|v| assert_eq!(*v, 42));
-            }).await;
+            })
+            .await;
         });
     }
 
@@ -207,10 +210,12 @@ mod tests {
                 FOO.with(|v| assert_eq!(*v, 1));
                 FOO.scope(2, async {
                     FOO.with(|v| assert_eq!(*v, 2));
-                }).await;
+                })
+                .await;
                 // Outer scope restored.
                 FOO.with(|v| assert_eq!(*v, 1));
-            }).await;
+            })
+            .await;
         });
     }
 
@@ -221,8 +226,10 @@ mod tests {
                 BAR.scope(String::from("hello"), async {
                     FOO.with(|v| assert_eq!(*v, 99));
                     BAR.with(|v| assert_eq!(v, "hello"));
-                }).await;
-            }).await;
+                })
+                .await;
+            })
+            .await;
         });
     }
 
@@ -238,11 +245,13 @@ mod tests {
     fn spawned_task_does_not_inherit_parent_scope() {
         block_on_with_spawn(async {
             FOO.scope(777, async {
-                let jh = spawn(async {
-                    FOO.try_with(|_| ()).is_err()
-                });
-                assert!(jh.await.unwrap(), "spawned task should not see parent scope");
-            }).await;
+                let jh = spawn(async { FOO.try_with(|_| ()).is_err() });
+                assert!(
+                    jh.await.unwrap(),
+                    "spawned task should not see parent scope"
+                );
+            })
+            .await;
         });
     }
 }

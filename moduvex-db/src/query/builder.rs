@@ -10,8 +10,8 @@
 //!     .build();
 //! ```
 
-use crate::query::param::{Param, ToParam, substitute_params};
 use crate::error::Result;
+use crate::query::param::{substitute_params, Param, ToParam};
 
 // ── Order ─────────────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ pub enum Order {
 impl Order {
     fn as_sql(&self) -> &'static str {
         match self {
-            Order::Asc  => "ASC",
+            Order::Asc => "ASC",
             Order::Desc => "DESC",
         }
     }
@@ -39,18 +39,21 @@ impl Order {
 /// `build_inlined()` to get the final SQL string.
 #[derive(Debug, Default)]
 pub struct QueryBuilder {
-    table:      String,
-    columns:    Vec<String>,
+    table: String,
+    columns: Vec<String>,
     conditions: Vec<(String, Param)>,
-    order:      Option<(String, Order)>,
-    limit:      Option<usize>,
-    offset:     Option<usize>,
+    order: Option<(String, Order)>,
+    limit: Option<usize>,
+    offset: Option<usize>,
 }
 
 impl QueryBuilder {
     /// Start a SELECT query against `table`.
     pub fn select(table: impl Into<String>) -> Self {
-        Self { table: table.into(), ..Default::default() }
+        Self {
+            table: table.into(),
+            ..Default::default()
+        }
     }
 
     /// Set the columns to SELECT. Defaults to `*` if not called.
@@ -97,7 +100,8 @@ impl QueryBuilder {
         let mut params: Vec<Param> = Vec::new();
 
         if !self.conditions.is_empty() {
-            let where_parts: Vec<String> = self.conditions
+            let where_parts: Vec<String> = self
+                .conditions
                 .into_iter()
                 .enumerate()
                 .map(|(i, (col, val))| {
@@ -146,7 +150,9 @@ mod tests {
 
     #[test]
     fn select_specific_columns() {
-        let (sql, _) = QueryBuilder::select("users").columns(&["id", "name"]).build();
+        let (sql, _) = QueryBuilder::select("users")
+            .columns(&["id", "name"])
+            .build();
         assert_eq!(sql, "SELECT id, name FROM users");
     }
 

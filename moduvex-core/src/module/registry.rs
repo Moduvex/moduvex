@@ -35,7 +35,9 @@ pub struct ModuleRegistry {
 impl ModuleRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// Append a module entry.
@@ -81,7 +83,9 @@ impl ModuleRegistry {
 }
 
 impl Default for ModuleRegistry {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -89,34 +93,47 @@ impl Default for ModuleRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::pin::Pin;
-    use std::future::Future;
     use crate::app::context::AppContext;
     use crate::error::Result;
     use crate::module::Module;
+    use std::future::Future;
+    use std::pin::Pin;
 
-    struct FakeMod { name: &'static str, prio: i32 }
+    struct FakeMod {
+        name: &'static str,
+        prio: i32,
+    }
 
     impl Module for FakeMod {
-        fn name(&self) -> &'static str { self.name }
-        fn priority(&self) -> i32 { self.prio }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn priority(&self) -> i32 {
+            self.prio
+        }
     }
 
     impl ModuleLifecycle for FakeMod {
-        fn on_start<'a>(&'a self, _ctx: &'a AppContext)
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-        {
+        fn on_start<'a>(
+            &'a self,
+            _ctx: &'a AppContext,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
             Box::pin(async { Ok(()) })
         }
-        fn on_stop<'a>(&'a self, _ctx: &'a AppContext)
-            -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-        {
+        fn on_stop<'a>(
+            &'a self,
+            _ctx: &'a AppContext,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
             Box::pin(async { Ok(()) })
         }
     }
 
     fn entry(name: &'static str, prio: i32) -> ModuleEntry {
-        ModuleEntry { name, priority: prio, lifecycle: Box::new(FakeMod { name, prio }) }
+        ModuleEntry {
+            name,
+            priority: prio,
+            lifecycle: Box::new(FakeMod { name, prio }),
+        }
     }
 
     #[test]
