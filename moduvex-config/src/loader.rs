@@ -32,12 +32,10 @@ fn read_toml_file(path: &PathBuf) -> Result<toml::Value, ConfigError> {
         path: path.display().to_string(),
         source: e.to_string(),
     })?;
-    content
-        .parse::<toml::Value>()
-        .map_err(|e| ConfigError::Parse {
-            path: path.display().to_string(),
-            source: e.to_string(),
-        })
+    toml::from_str::<toml::Value>(&content).map_err(|e| ConfigError::Parse {
+        path: path.display().to_string(),
+        source: e.to_string(),
+    })
 }
 
 /// Deep-merge two TOML values. `overlay` wins on conflict.
@@ -132,8 +130,8 @@ mod tests {
 
     #[test]
     fn deep_merge_nested_tables() {
-        let base: toml::Value = "[db]\nhost = \"localhost\"\npool = 5\n".parse().unwrap();
-        let overlay: toml::Value = "[db]\npool = 20\nssl = true\n".parse().unwrap();
+        let base: toml::Value = toml::from_str("[db]\nhost = \"localhost\"\npool = 5\n").unwrap();
+        let overlay: toml::Value = toml::from_str("[db]\npool = 20\nssl = true\n").unwrap();
         let merged = deep_merge(base, overlay);
         let db = merged["db"].as_table().unwrap();
         assert_eq!(db["host"].as_str().unwrap(), "localhost");
