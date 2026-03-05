@@ -127,7 +127,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "multi-threaded executor: concurrency bug under investigation"]
     fn builder_creates_runtime() {
         let rt = Runtime::builder()
             .thread_per_core()
@@ -150,7 +149,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "multi-threaded executor: concurrency bug under investigation"]
     fn runtime_worker_threads_api() {
         let rt = Runtime::builder()
             .worker_threads(2)
@@ -161,7 +159,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "multi-threaded executor: concurrency bug under investigation"]
     fn runtime_multi_thread_spawn() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;

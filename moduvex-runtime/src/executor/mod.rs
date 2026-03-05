@@ -42,7 +42,7 @@ use crate::signal::{on_signal_readable, SIGNAL_TOKEN};
 
 use scheduler::{GlobalQueue, LocalQueue};
 use task::{JoinHandle, Task, STATE_CANCELLED, STATE_COMPLETED};
-use waker::make_waker;
+use waker::{make_waker, make_waker_with_notifier, WorkerNotifier};
 use work_stealing::{StealableQueue, WorkStealingPool};
 use worker::{clear_current_worker_wake_tx, set_current_worker_wake_tx, WorkerThread};
 
@@ -288,6 +288,7 @@ struct MultiState {
     steal_pool: Arc<Mutex<WorkStealingPool>>,
     tasks: Arc<Mutex<HashMap<usize, Task>>>,
     shutdown: Arc<AtomicBool>,
+    notifier: Arc<WorkerNotifier>,
 }
 
 impl MultiState {
@@ -297,6 +298,7 @@ impl MultiState {
             steal_pool: Arc::new(Mutex::new(WorkStealingPool::new())),
             tasks: Arc::new(Mutex::new(HashMap::new())),
             shutdown: Arc::new(AtomicBool::new(false)),
+            notifier: Arc::new(WorkerNotifier::new()),
         }
     }
 }
@@ -345,20 +347,11 @@ where
 
     let state = MultiState::new();
 
-    // Register all worker stealable queues with the pool.
-    let worker_queues: Vec<Arc<StealableQueue>> = (0..num_workers)
-        .map(|_| Arc::new(StealableQueue::new()))
-        .collect();
-    {
-        let mut pool = state.steal_pool.lock().unwrap();
-        for q in &worker_queues {
-            pool.add_worker(Arc::clone(q));
-        }
-    }
+    // Build a single WorkStealingPool for all workers.
     let steal_pool_arc = Arc::new({
         let mut pool = WorkStealingPool::new();
-        for q in &worker_queues {
-            pool.add_worker(Arc::clone(q));
+        for _ in 0..num_workers {
+            pool.add_worker(Arc::new(StealableQueue::new()));
         }
         pool
     });
@@ -376,6 +369,7 @@ where
         let steal_pool = Arc::clone(&steal_pool_arc);
         let tasks = Arc::clone(&state.tasks);
         let shutdown = Arc::clone(&state.shutdown);
+        let notifier = Arc::clone(&state.notifier);
 
         let handle = std::thread::spawn(move || {
             // Set MT thread-locals on this worker thread.
@@ -390,11 +384,12 @@ where
                 steal_pool,
                 tasks,
                 shutdown,
+                Arc::clone(&notifier),
             )
             .expect("worker init failed");
 
-            // Register this worker's stealable queue.
-            // (already in pool from setup above — worker uses shared pool)
+            // Register this worker's self-pipe with the notifier.
+            notifier.add_fd(worker.wake_tx());
 
             set_current_worker_wake_tx(worker.wake_tx());
             worker.run();
@@ -411,6 +406,10 @@ where
 
     // Signal all workers to stop.
     state.shutdown.store(true, Ordering::Release);
+    // Wake all parked workers so they see shutdown.
+    for _ in 0..num_workers {
+        state.notifier.notify_one();
+    }
 
     // Join all background workers.
     for h in handles {
@@ -437,6 +436,8 @@ where
             .expect("worker 0 wake pipe register failed")
     });
 
+    // Register worker 0's self-pipe with the notifier.
+    state.notifier.add_fd(wake_tx);
     set_current_worker_wake_tx(wake_tx);
 
     let mut root = std::pin::pin!(future);
@@ -497,7 +498,11 @@ where
                 continue;
             }
 
-            let waker = make_waker(Arc::clone(&header), Arc::clone(&state.global));
+            let waker = make_waker_with_notifier(
+                Arc::clone(&header),
+                Arc::clone(&state.global),
+                Some(Arc::clone(&state.notifier)),
+            );
             let mut cx = Context::from_waker(&waker);
 
             // Extract task, poll, re-insert or drop.
@@ -640,10 +645,13 @@ where
     if !mt_global.is_null() && !mt_tasks.is_null() {
         let (task, jh) = Task::new(future);
         let key = Arc::as_ptr(&task.header) as usize;
+        let header_clone = Arc::clone(&task.header);
         // SAFETY: pointers are valid for the duration of block_on_multi.
+        // Insert task BEFORE pushing header — prevents race where a background
+        // worker pops the header but finds no Task in the map.
         unsafe {
-            (*mt_global).push_header(Arc::clone(&task.header));
             (*mt_tasks).lock().unwrap().insert(key, task);
+            (*mt_global).push_header(header_clone);
         }
         return jh;
     }
@@ -740,12 +748,7 @@ mod tests {
 
     // ── Multi-threaded tests ───────────────────────────────────────────────
 
-    // TODO: Multi-threaded executor tests hang due to concurrency bug in
-    // task wake/park coordination. Infrastructure is in place but needs
-    // careful debugging with thread-safe tracing. Tracked for Phase 7 v2.
-
     #[test]
-    #[ignore = "multi-threaded executor: concurrency bug under investigation"]
     fn multi_thread_simple_spawn() {
         let result = block_on_multi(
             async {
@@ -758,7 +761,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "multi-threaded executor: concurrency bug under investigation"]
     fn multi_thread_many_tasks_complete() {
         const N: usize = 100;
         let counter = Arc::new(AtomicUsize::new(0));
@@ -784,7 +786,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "multi-threaded executor: concurrency bug under investigation"]
     fn multi_thread_falls_back_to_single_with_one_worker() {
         // num_workers=1 uses single-thread path, must still work.
         let result = block_on_multi(async { 99u32 }, 1);
@@ -792,7 +793,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "multi-threaded executor: concurrency bug under investigation"]
     fn multi_thread_1000_tasks_4_workers() {
         const N: usize = 1000;
         let counter = Arc::new(AtomicUsize::new(0));
