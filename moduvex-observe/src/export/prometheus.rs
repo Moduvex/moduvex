@@ -51,6 +51,15 @@ impl PrometheusExporter {
         }
         Ok(())
     }
+
+    /// Convenience: render to a `Vec<u8>` for use in HTTP responses, tests, etc.
+    pub fn render_to_vec(
+        metrics: &[(&str, &str, MetricKind, MetricSnapshot)],
+    ) -> std::io::Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        Self::render(metrics, &mut buf)?;
+        Ok(buf)
+    }
 }
 
 impl super::Exporter for PrometheusExporter {
@@ -58,9 +67,12 @@ impl super::Exporter for PrometheusExporter {
         &self,
         metrics: &[(&str, &str, MetricKind, MetricSnapshot)],
     ) -> std::io::Result<()> {
+        let mut buf = Vec::new();
+        Self::render(metrics, &mut buf)?;
+        // Write the complete buffer to stdout in one lock to avoid interleaving.
         let stdout = std::io::stdout();
         let mut lock = stdout.lock();
-        Self::render(metrics, &mut lock)
+        lock.write_all(&buf)
     }
 }
 

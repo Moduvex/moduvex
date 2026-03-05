@@ -34,35 +34,54 @@ pub struct CheckResult {
     pub status: HealthStatus,
 }
 
-/// Trait for components that can report their health.
+/// Trait for components that can report their health synchronously.
 pub trait HealthCheck: Send + Sync {
     /// Human-readable name of this check.
     fn name(&self) -> &str;
 
-    /// Perform the health check (synchronous version).
+    /// Perform the health check.
     fn check(&self) -> HealthStatus;
 }
 
-/// Registry that aggregates multiple health checks.
+/// Trait for components that require async to report health (e.g. DB pings).
+///
+/// Use this for checks that need I/O (network, disk) via the async runtime.
+/// Returns a `'static` future so it can be collected and awaited outside a lock.
+pub trait AsyncHealthCheck: Send + Sync {
+    /// Human-readable name of this check.
+    fn name(&self) -> &str;
+
+    /// Perform the health check asynchronously.
+    fn check(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = HealthStatus> + Send>>;
+}
+
+/// Registry that aggregates multiple health checks (sync and async).
 pub struct HealthRegistry {
-    checks: Mutex<Vec<Box<dyn HealthCheck>>>,
+    sync_checks: Mutex<Vec<Box<dyn HealthCheck>>>,
+    async_checks: Mutex<Vec<Box<dyn AsyncHealthCheck>>>,
 }
 
 impl HealthRegistry {
     pub fn new() -> Self {
         Self {
-            checks: Mutex::new(Vec::new()),
+            sync_checks: Mutex::new(Vec::new()),
+            async_checks: Mutex::new(Vec::new()),
         }
     }
 
-    /// Register a health check.
+    /// Register a synchronous health check.
     pub fn register(&self, check: impl HealthCheck + 'static) {
-        self.checks.lock().unwrap().push(Box::new(check));
+        self.sync_checks.lock().unwrap().push(Box::new(check));
     }
 
-    /// Run all checks and return individual results.
+    /// Register an async health check (e.g. DB connection ping).
+    pub fn register_async(&self, check: Box<dyn AsyncHealthCheck>) {
+        self.async_checks.lock().unwrap().push(check);
+    }
+
+    /// Run all synchronous checks and return individual results.
     pub fn check_all(&self) -> Vec<CheckResult> {
-        let checks = self.checks.lock().unwrap();
+        let checks = self.sync_checks.lock().unwrap();
         checks
             .iter()
             .map(|c| CheckResult {
@@ -72,23 +91,55 @@ impl HealthRegistry {
             .collect()
     }
 
+    /// Run all checks (sync + async) and return individual results.
+    pub async fn check_all_async(&self) -> Vec<CheckResult> {
+        let mut results = self.check_all();
+
+        // Collect async check references while holding the lock, then run outside lock
+        let names_and_futures: Vec<_> = {
+            let async_checks = self.async_checks.lock().unwrap();
+            async_checks
+                .iter()
+                .map(|c| (c.name().to_owned(), c.check()))
+                .collect()
+        };
+
+        for (name, future) in names_and_futures {
+            let status = future.await;
+            results.push(CheckResult { name, status });
+        }
+
+        results
+    }
+
     /// Aggregate status: Unhealthy if any unhealthy, Degraded if any degraded.
     pub fn aggregate(&self) -> HealthStatus {
         let results = self.check_all();
-        let mut worst = HealthStatus::Healthy;
-        for r in &results {
-            match &r.status {
-                HealthStatus::Unhealthy(msg) => {
-                    return HealthStatus::Unhealthy(format!("{}: {msg}", r.name));
-                }
-                HealthStatus::Degraded(msg) => {
-                    worst = HealthStatus::Degraded(format!("{}: {msg}", r.name));
-                }
-                HealthStatus::Healthy => {}
-            }
-        }
-        worst
+        aggregate_results(&results)
     }
+
+    /// Aggregate all checks including async ones.
+    pub async fn aggregate_async(&self) -> HealthStatus {
+        let results = self.check_all_async().await;
+        aggregate_results(&results)
+    }
+}
+
+/// Compute worst status from a list of check results.
+fn aggregate_results(results: &[CheckResult]) -> HealthStatus {
+    let mut worst = HealthStatus::Healthy;
+    for r in results {
+        match &r.status {
+            HealthStatus::Unhealthy(msg) => {
+                return HealthStatus::Unhealthy(format!("{}: {msg}", r.name));
+            }
+            HealthStatus::Degraded(msg) => {
+                worst = HealthStatus::Degraded(format!("{}: {msg}", r.name));
+            }
+            HealthStatus::Healthy => {}
+        }
+    }
+    worst
 }
 
 impl Default for HealthRegistry {

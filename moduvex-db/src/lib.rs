@@ -18,9 +18,13 @@
 //! moduvex_runtime::block_on(async {
 //!     let mut conn = pool.acquire().await.unwrap();
 //!     let sql = QueryBuilder::select("users")
+//!         .unwrap()
 //!         .columns(&["id", "name"])
+//!         .unwrap()
 //!         .where_eq("active", true)
+//!         .unwrap()
 //!         .order_by("id", Order::Asc)
+//!         .unwrap()
 //!         .limit(10)
 //!         .build_inlined()
 //!         .unwrap();

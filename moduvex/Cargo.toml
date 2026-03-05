@@ -13,12 +13,12 @@ moduvex-core = { version = "0.1.0", path = "../moduvex-core" }
 moduvex-config = { version = "0.1.0", path = "../moduvex-config" }
 moduvex-http = { version = "0.1.0", path = "../moduvex-http", optional = true }
 moduvex-db = { version = "0.1.0", path = "../moduvex-db", optional = true }
-moduvex-observe = { version = "0.1.0", path = "../moduvex-observe", optional = true }
+moduvex-observe = { version = "0.1.0", path = "../moduvex-observe" }
 moduvex-starter-web = { version = "0.1.0", path = "../moduvex-starter-web", optional = true }
 moduvex-starter-data = { version = "0.1.0", path = "../moduvex-starter-data", optional = true }
 
 [features]
 default = ["web", "data"]
-web = ["moduvex-http", "moduvex-observe", "moduvex-starter-web"]
+web = ["moduvex-http", "moduvex-starter-web"]
 data = ["moduvex-db", "moduvex-starter-data"]
 full = ["web", "data"]

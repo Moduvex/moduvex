@@ -71,10 +71,8 @@ impl Default for TypeMap {
     }
 }
 
-// TypeMap is Send + Sync because RwLock<HashMap<...>> is Send + Sync
-// when the values are Send + Sync, which they are (bounded above).
-unsafe impl Send for TypeMap {}
-unsafe impl Sync for TypeMap {}
+// TypeMap auto-derives Send + Sync: RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>
+// is Send + Sync when inner values are Send + Sync (which they are, bounded above).
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

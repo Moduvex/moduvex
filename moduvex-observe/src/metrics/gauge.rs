@@ -53,8 +53,7 @@ impl Gauge {
     }
 }
 
-unsafe impl Send for Gauge {}
-unsafe impl Sync for Gauge {}
+// All fields are Send + Sync (AtomicI64, &'static str), so Gauge auto-derives both.
 
 impl std::fmt::Debug for Gauge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

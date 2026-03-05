@@ -16,6 +16,7 @@ pub use hook::{HookRegistry, LifecycleHook};
 pub use phase::Phase;
 pub use shutdown::{wait_for_shutdown, ShutdownConfig, ShutdownHandle};
 
+use std::future::Future;
 use std::sync::Arc;
 
 use crate::app::context::AppContext;
@@ -73,7 +74,7 @@ impl LifecycleEngine {
             registry,
             ctx,
             hooks,
-            shutdown_cfg: _,
+            shutdown_cfg,
             shutdown_handle,
         } = self;
 
@@ -116,8 +117,30 @@ impl LifecycleEngine {
         // ── Shutdown sequence ────────────────────────────────────────────────
         hooks.notify_phase_entered(Phase::Stopping, &ctx).await?;
 
-        // Stop modules in reverse boot order.
-        let stop_err = rollback(&entries, &ctx).await;
+        // Stop modules in reverse boot order with timeout.
+        // Pin both futures and poll them concurrently: whichever completes first wins.
+        let timeout_dur = shutdown_cfg.drain_timeout;
+        let stop_err = {
+            let rollback_fut = rollback(&entries, &ctx);
+            let sleep_fut = moduvex_runtime::sleep(timeout_dur);
+            // Pin both futures for polling.
+            let mut rollback_fut = std::pin::pin!(rollback_fut);
+            let mut sleep_fut = std::pin::pin!(sleep_fut);
+
+            std::future::poll_fn(|cx| {
+                // Check rollback first — if done, return its result.
+                if let std::task::Poll::Ready(result) = rollback_fut.as_mut().poll(cx) {
+                    return std::task::Poll::Ready(result);
+                }
+                // Check timeout — if expired, force exit.
+                if let std::task::Poll::Ready(()) = sleep_fut.as_mut().poll(cx) {
+                    eprintln!("[moduvex] shutdown drain timeout exceeded, forcing exit");
+                    return std::task::Poll::Ready(Ok(()));
+                }
+                std::task::Poll::Pending
+            })
+            .await
+        };
 
         hooks.notify_phase_entered(Phase::Stopped, &ctx).await?;
 

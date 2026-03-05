@@ -46,7 +46,7 @@ pub use metrics::registry::MetricsRegistry;
 
 // ── Re-exports: Health ──
 
-pub use health::{HealthCheck, HealthRegistry, HealthStatus};
+pub use health::{AsyncHealthCheck, HealthCheck, HealthRegistry, HealthStatus};
 
 // ── Re-exports: Export ──
 

@@ -13,6 +13,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(not(unix))]
+use std::sync::Mutex;
+#[cfg(not(unix))]
+use std::task::Waker;
+
 // ── ShutdownConfig ────────────────────────────────────────────────────────────
 
 /// Configuration for graceful shutdown behaviour.
@@ -38,9 +43,25 @@ impl Default for ShutdownConfig {
 /// The `LifecycleEngine` holds one; modules or middleware can clone and use it
 /// to trigger graceful shutdown without sending an OS signal (useful in tests
 /// and for programmatic lifecycle control).
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ShutdownHandle {
     requested: Arc<AtomicBool>,
+    #[cfg(not(unix))]
+    waker: Arc<Mutex<Option<Waker>>>,
+}
+
+#[cfg(unix)]
+impl Default for ShutdownHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(not(unix))]
+impl Default for ShutdownHandle {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ShutdownHandle {
@@ -48,12 +69,18 @@ impl ShutdownHandle {
     pub fn new() -> Self {
         Self {
             requested: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(unix))]
+            waker: Arc::new(Mutex::new(None)),
         }
     }
 
     /// Signal that shutdown should begin.
     pub fn request(&self) {
         self.requested.store(true, Ordering::Release);
+        #[cfg(not(unix))]
+        if let Some(w) = self.waker.lock().unwrap().take() {
+            w.wake();
+        }
     }
 
     /// Returns `true` if shutdown has been requested.
@@ -115,14 +142,13 @@ pub async fn wait_for_shutdown(handle: &ShutdownHandle) {
     #[cfg(not(unix))]
     {
         // Non-Unix: only programmatic shutdown is supported.
-        // Use poll_fn to avoid spin-loop — waker must be stored externally
-        // by the ShutdownHandle to wake this future when requested.
-        std::future::poll_fn(|cx: &mut std::task::Context<'_>| {
-            if handle.is_requested() {
+        // Store waker so request() can wake this future.
+        let handle_clone = handle.clone();
+        std::future::poll_fn(move |cx: &mut std::task::Context<'_>| {
+            if handle_clone.is_requested() {
                 std::task::Poll::Ready(())
             } else {
-                // Schedule a re-check: wake ourselves on next executor tick.
-                cx.waker().wake_by_ref();
+                *handle_clone.waker.lock().unwrap() = Some(cx.waker().clone());
                 std::task::Poll::Pending
             }
         })

@@ -40,23 +40,6 @@ pub fn parse_pattern(pattern: &str) -> Vec<PathSegment> {
         .collect()
 }
 
-/// Match `path` against a slice of `PathSegment`s, filling `params` with
-/// captured `(name, value)` pairs. Returns `true` on full match.
-pub fn match_segments(
-    segments: &[PathSegment],
-    path: &str,
-    params: &mut Vec<(&'static str, String)>,
-) -> bool {
-    // We need static name lifetimes for params; use string storage instead.
-    match_segments_owned(
-        segments,
-        path,
-        &mut params.iter().map(|_| ()).collect::<Vec<_>>(),
-    );
-    // Delegate to the owned version that returns captured pairs.
-    false // placeholder — use match_path below
-}
-
 /// Match a URL path against route segments, returning captured params.
 ///
 /// Returns `Some(Vec<(name, value)>)` on match, `None` on mismatch.
@@ -102,9 +85,6 @@ pub fn match_path(segments: &[PathSegment], url_path: &str) -> Option<Vec<(Strin
         None
     }
 }
-
-// Unused helper; kept to satisfy the public signature above.
-fn match_segments_owned(_: &[PathSegment], _: &str, _: &mut Vec<()>) {}
 
 #[cfg(test)]
 mod tests {

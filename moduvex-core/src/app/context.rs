@@ -71,9 +71,7 @@ impl Default for AppContext {
     }
 }
 
-// SAFETY: TypeMap is Send + Sync (RwLock<HashMap<...>> with Send + Sync values)
-unsafe impl Send for AppContext {}
-unsafe impl Sync for AppContext {}
+// AppContext auto-derives Send + Sync: its only field (TypeMap) is Send + Sync.
 
 // ── RequestContext ─────────────────────────────────────────────────────────────
 

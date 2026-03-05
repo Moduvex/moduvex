@@ -13,6 +13,7 @@ use std::task::{Context, Poll};
 use crate::platform::sys::{set_nonblocking, Interest};
 use crate::reactor::source::{next_token, IoSource};
 
+use super::sockaddr::{reclaim_raw_sockaddr, sockaddr_to_socketaddr, socketaddr_to_raw};
 use super::{AsyncRead, AsyncWrite};
 
 // ── TcpStream ─────────────────────────────────────────────────────────────────
@@ -282,25 +283,18 @@ impl Drop for ConnectFuture {
 
 /// Non-blocking poll: returns true if `fd` is writable right now.
 ///
-/// Uses `select` with a zero timeout to probe write-readiness.
+/// Uses `poll(2)` with a zero timeout to probe write-readiness.
+/// Unlike `select(2)`, this has no FD_SETSIZE limit.
 fn is_writable_now(fd: i32) -> bool {
-    // SAFETY: all libc types are initialized; select is a documented syscall.
+    // SAFETY: pollfd is a plain C struct; poll is a documented POSIX syscall.
     unsafe {
-        let mut write_set: libc::fd_set = std::mem::zeroed();
-        libc::FD_ZERO(&mut write_set);
-        libc::FD_SET(fd, &mut write_set);
-        let mut tv = libc::timeval {
-            tv_sec: 0,
-            tv_usec: 0,
+        let mut pfd = libc::pollfd {
+            fd,
+            events: libc::POLLOUT,
+            revents: 0,
         };
-        let n = libc::select(
-            fd + 1,
-            std::ptr::null_mut(),
-            &mut write_set,
-            std::ptr::null_mut(),
-            &mut tv,
-        );
-        n > 0 && libc::FD_ISSET(fd, &write_set)
+        let n = libc::poll(&mut pfd, 1, 0);
+        n > 0 && (pfd.revents & libc::POLLOUT) != 0
     }
 }
 
@@ -388,84 +382,6 @@ fn local_addr(fd: i32) -> io::Result<SocketAddr> {
         return Err(io::Error::last_os_error());
     }
     sockaddr_to_socketaddr(&addr, len)
-}
-
-/// Convert `SocketAddr` to a heap-allocated raw sockaddr pointer.
-///
-/// Caller must call `reclaim_raw_sockaddr` after the syscall to free memory.
-fn socketaddr_to_raw(addr: SocketAddr) -> (*const libc::sockaddr, libc::socklen_t) {
-    match addr {
-        SocketAddr::V4(v4) => {
-            let octets = v4.ip().octets();
-            // SAFETY: zeroed() gives a valid bit pattern; we fill every field.
-            let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-            sin.sin_family = libc::AF_INET as libc::sa_family_t;
-            sin.sin_port = v4.port().to_be();
-            sin.sin_addr = libc::in_addr {
-                s_addr: u32::from_be_bytes(octets).to_be(),
-            };
-            let boxed = Box::new(sin);
-            let ptr = Box::into_raw(boxed) as *const libc::sockaddr;
-            let len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-            (ptr, len)
-        }
-        SocketAddr::V6(v6) => {
-            // SAFETY: zeroed() gives a valid bit pattern; we fill every field.
-            let mut sin6: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
-            sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
-            sin6.sin6_port = v6.port().to_be();
-            sin6.sin6_flowinfo = v6.flowinfo();
-            sin6.sin6_addr = libc::in6_addr {
-                s6_addr: v6.ip().octets(),
-            };
-            sin6.sin6_scope_id = v6.scope_id();
-            let boxed = Box::new(sin6);
-            let ptr = Box::into_raw(boxed) as *const libc::sockaddr;
-            let len = std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t;
-            (ptr, len)
-        }
-    }
-}
-
-/// # Safety
-/// `ptr` must have been produced by `socketaddr_to_raw` with matching `addr`.
-unsafe fn reclaim_raw_sockaddr(ptr: *const libc::sockaddr, addr: SocketAddr) {
-    match addr {
-        SocketAddr::V4(_) => drop(Box::from_raw(ptr as *mut libc::sockaddr_in)),
-        SocketAddr::V6(_) => drop(Box::from_raw(ptr as *mut libc::sockaddr_in6)),
-    }
-}
-
-/// Convert a kernel-filled `sockaddr_in6` buffer (may be `sockaddr_in`) to `SocketAddr`.
-fn sockaddr_to_socketaddr(
-    addr: &libc::sockaddr_in6,
-    len: libc::socklen_t,
-) -> io::Result<SocketAddr> {
-    let family = addr.sin6_family as libc::c_int;
-    match family {
-        libc::AF_INET if len >= std::mem::size_of::<libc::sockaddr_in>() as u32 => {
-            // SAFETY: kernel wrote AF_INET data of correct size.
-            let v4: &libc::sockaddr_in =
-                unsafe { &*(addr as *const _ as *const libc::sockaddr_in) };
-            let ip = std::net::Ipv4Addr::from(u32::from_be(v4.sin_addr.s_addr));
-            let port = u16::from_be(v4.sin_port);
-            Ok(SocketAddr::V4(std::net::SocketAddrV4::new(ip, port)))
-        }
-        libc::AF_INET6 if len >= std::mem::size_of::<libc::sockaddr_in6>() as u32 => {
-            let ip = std::net::Ipv6Addr::from(addr.sin6_addr.s6_addr);
-            let port = u16::from_be(addr.sin6_port);
-            Ok(SocketAddr::V6(std::net::SocketAddrV6::new(
-                ip,
-                port,
-                addr.sin6_flowinfo,
-                addr.sin6_scope_id,
-            )))
-        }
-        _ => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unsupported address family: {family}"),
-        )),
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
