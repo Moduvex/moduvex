@@ -34,6 +34,7 @@
 //! ```
 
 pub mod connection;
+pub mod h2_handler;
 pub mod listener;
 pub mod tls;
 
@@ -314,8 +315,21 @@ impl HttpServer {
                             #[cfg(not(feature = "tls"))]
                             let stream = Stream::Plain(tcp_stream);
 
-                            let conn = Connection::new(stream, peer_addr, config);
-                            conn.run(&router, &mws, &inj).await;
+                            // Detect HTTP/2 via ALPN (TLS) or connection preface (h2c).
+                            // For TLS: check the negotiated ALPN protocol.
+                            // For plain TCP: h2c detection happens inside H1 Connection
+                            // via the preface peek path (not yet implemented — falls back to H1).
+                            let is_h2 = stream.alpn_protocol() == Some(b"h2");
+
+                            if is_h2 {
+                                h2_handler::run_h2_connection(
+                                    stream, peer_addr, &router, &mws, &inj,
+                                )
+                                .await;
+                            } else {
+                                let conn = Connection::new(stream, peer_addr, config);
+                                conn.run(&router, &mws, &inj).await;
+                            }
                             conns.fetch_sub(1, Ordering::AcqRel);
                         }));
                     }

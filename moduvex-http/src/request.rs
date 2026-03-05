@@ -19,14 +19,17 @@ use crate::routing::method::Method;
 pub enum HttpVersion {
     Http10,
     Http11,
+    /// HTTP/2 (RFC 9113) — used for requests dispatched from the H2 connection manager.
+    Http2,
 }
 
 impl HttpVersion {
-    /// Wire representation: `"HTTP/1.0"` or `"HTTP/1.1"`.
+    /// Wire representation: `"HTTP/1.0"`, `"HTTP/1.1"`, or `"HTTP/2.0"`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Http10 => "HTTP/1.0",
             Self::Http11 => "HTTP/1.1",
+            Self::Http2 => "HTTP/2.0",
         }
     }
 }
@@ -145,7 +148,8 @@ impl Request {
                 return true;
             }
         }
-        self.version == HttpVersion::Http11
+        // HTTP/2 uses stream multiplexing; H1 keep-alive semantics don't apply.
+        matches!(self.version, HttpVersion::Http11)
     }
 
     /// Content-Length header value, if present and valid.

@@ -1,4 +1,4 @@
-//! HTTP protocol implementations — currently HTTP/1.1 only.
-//! HTTP/2 is deferred to a future phase.
+//! HTTP protocol implementations — HTTP/1.1 and HTTP/2 frame codec.
 
 pub mod h1;
+pub mod h2;

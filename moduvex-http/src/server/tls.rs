@@ -69,14 +69,20 @@ impl TlsConfig {
     }
 
     /// Build a `rustls::ServerConfig` from this config.
+    ///
+    /// Advertises `h2` and `http/1.1` via ALPN so TLS clients can negotiate
+    /// HTTP/2 during the handshake (RFC 7301).
     pub fn into_server_config(self) -> Result<rustls::ServerConfig, TlsConfigError> {
         let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
-        rustls::ServerConfig::builder_with_provider(provider)
+        let mut config = rustls::ServerConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
             .map_err(|e| TlsConfigError(format!("rustls protocol: {e}")))?
             .with_no_client_auth()
             .with_single_cert(self.cert_chain, self.private_key)
-            .map_err(|e| TlsConfigError(format!("rustls config: {e}")))
+            .map_err(|e| TlsConfigError(format!("rustls config: {e}")))?;
+        // Advertise HTTP/2 first so clients that support it will prefer it.
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Ok(config)
     }
 }
 
@@ -133,6 +139,14 @@ impl TlsStream {
             write_buf: Vec::new(),
             write_offset: 0,
         }
+    }
+
+    /// Return the negotiated ALPN protocol after the TLS handshake, if any.
+    ///
+    /// Returns `Some(b"h2")` when HTTP/2 was negotiated, `Some(b"http/1.1")`
+    /// for HTTP/1.1, or `None` if no ALPN was performed.
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.conn.alpn_protocol()
     }
 
     /// Perform the TLS handshake asynchronously.
@@ -498,6 +512,21 @@ pub enum Stream {
     /// TLS-encrypted connection (boxed to level enum variant sizes).
     #[cfg(feature = "tls")]
     Tls(Box<TlsStream>),
+}
+
+impl Stream {
+    /// Return the negotiated ALPN protocol (TLS only).
+    ///
+    /// Returns `Some(b"h2")` when HTTP/2 was negotiated via ALPN,
+    /// `Some(b"http/1.1")` for HTTP/1.1, or `None` for plain TCP connections
+    /// and TLS connections where no ALPN was performed.
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        match self {
+            Stream::Plain(_) => None,
+            #[cfg(feature = "tls")]
+            Stream::Tls(s) => s.alpn_protocol(),
+        }
+    }
 }
 
 impl moduvex_runtime::net::AsyncRead for Stream {
