@@ -31,11 +31,12 @@ pub mod response;
 pub mod routing;
 pub mod server;
 pub mod status;
+pub mod websocket;
 
 // ── Top-level re-exports ──────────────────────────────────────────────────────
 
 pub use body::{Body, BodyReceiver, BodySender};
-pub use extract::{FromRequest, IntoHandler, Json, Path, Query, State};
+pub use extract::{Form, FromRequest, IntoHandler, Json, Multipart, Path, Query, State};
 pub use header::HeaderMap;
 pub use middleware::Middleware;
 pub use request::{Extensions, HttpVersion, Request};
@@ -44,6 +45,7 @@ pub use routing::method::Method;
 pub use routing::router::Router;
 pub use server::HttpServer;
 pub use status::StatusCode;
+pub use websocket::{Message, WebSocketUpgrade, WsError, WsStream};
 
 // ── Prelude ───────────────────────────────────────────────────────────────────
 
@@ -54,8 +56,8 @@ pub use status::StatusCode;
 /// ```
 pub mod prelude {
     pub use crate::{
-        Body, Extensions, FromRequest, HeaderMap, HttpServer, HttpVersion, IntoHandler,
-        IntoResponse, Json, Method, Middleware, Path, Query, Request, Response, Router, State,
-        StatusCode,
+        Body, Extensions, Form, FromRequest, HeaderMap, HttpServer, HttpVersion, IntoHandler,
+        IntoResponse, Json, Message, Method, Middleware, Multipart, Path, Query, Request,
+        Response, Router, State, StatusCode, WebSocketUpgrade, WsStream,
     };
 }

@@ -11,7 +11,9 @@ use crate::response::{IntoResponse, Response};
 use crate::routing::method::Method;
 use crate::routing::router::BoxHandler;
 
+pub mod form;
 pub mod json;
+pub mod multipart;
 pub mod path_params;
 pub mod query;
 pub mod state;
@@ -122,7 +124,9 @@ impl_handler!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 // ── Re-exports ───────────────────────────────────────────────────────────────
 
+pub use form::Form;
 pub use json::Json;
+pub use multipart::Multipart;
 pub use path_params::Path;
 pub use query::Query;
 pub use state::State;

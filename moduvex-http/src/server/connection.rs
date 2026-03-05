@@ -30,6 +30,7 @@ use crate::routing::method::Method;
 use crate::routing::router::{BoxHandler, Router};
 use crate::server::StateInjector;
 use crate::status::StatusCode;
+use crate::websocket::{BoxWsCallback, WsStream};
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -109,7 +110,8 @@ struct OwnedHead {
 
 /// Drives a single connection (plain TCP or TLS) through the HTTP request/response cycle.
 pub struct Connection {
-    stream: Stream,
+    /// Underlying stream — `None` only transiently during WebSocket upgrade hand-off.
+    stream: Option<Stream>,
     peer_addr: SocketAddr,
     config: ConnConfig,
     requests_served: u32,
@@ -118,12 +120,13 @@ pub struct Connection {
 impl Connection {
     pub fn new(stream: Stream, peer_addr: SocketAddr, config: ConnConfig) -> Self {
         Self {
-            stream,
+            stream: Some(stream),
             peer_addr,
             config,
             requests_served: 0,
         }
     }
+
 
     /// Run the connection loop with middleware support.
     ///
@@ -230,7 +233,45 @@ impl Connection {
                 response
             };
 
-            // 5. Keep-alive
+            // 5a. WebSocket upgrade — detect 101 response, hand off stream.
+            //
+            // If the handler returned 101 Switching Protocols and embedded a
+            // BoxWsCallback in response.extensions, we:
+            //   (a) encode + flush the 101 response, then
+            //   (b) take self.stream out of Option and pass it to the callback.
+            //
+            // After the upgrade the HTTP loop exits — the stream is moved into WsStream.
+            if response.status == StatusCode::SWITCHING_PROTOCOLS {
+                let mut resp = response;
+                let callback = resp.extensions.remove::<BoxWsCallback>();
+
+                // Encode and flush the 101 Switching Protocols response.
+                let mut out = Vec::with_capacity(256);
+                encode_response(resp, &mut out);
+                if with_timeout(self.config.write_timeout, self.write_all(&out))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+
+                // Move the stream into WsStream and invoke the user callback.
+                // `BoxWsCallback::take()` extracts the inner FnOnce from the Mutex.
+                if let Some(raw_cb) = callback.and_then(|c| c.take()) {
+                    if let Some(stream) = self.stream.take() {
+                        let mut ws = WsStream::new(stream);
+                        // Drain any buffered bytes into the WsStream read buffer
+                        // (should normally be empty at upgrade time).
+                        if !read_buf.is_empty() {
+                            ws.prepend_read_buf(std::mem::take(&mut read_buf));
+                        }
+                        raw_cb(ws).await;
+                    }
+                }
+                break; // Always exit the HTTP loop after WebSocket upgrade.
+            }
+
+            // 5b. Keep-alive (standard HTTP)
             self.requests_served += 1;
             let keep_alive = keep_alive_req
                 && version == HttpVersion::Http11
@@ -378,14 +419,21 @@ impl Connection {
 
     async fn read_some(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         use std::future::poll_fn;
-        poll_fn(|cx| Pin::new(&mut self.stream).poll_read(cx, buf)).await
+        poll_fn(|cx| {
+            Pin::new(self.stream.as_mut().expect("stream gone")).poll_read(cx, buf)
+        })
+        .await
     }
 
     async fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
         use std::future::poll_fn;
         let mut sent = 0;
         while sent < buf.len() {
-            let n = poll_fn(|cx| Pin::new(&mut self.stream).poll_write(cx, &buf[sent..])).await?;
+            let n = poll_fn(|cx| {
+                Pin::new(self.stream.as_mut().expect("stream gone"))
+                    .poll_write(cx, &buf[sent..])
+            })
+            .await?;
             if n == 0 {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::WriteZero,

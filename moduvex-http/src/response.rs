@@ -6,6 +6,7 @@
 
 use crate::body::Body;
 use crate::header::HeaderMap;
+use crate::request::Extensions;
 use crate::status::StatusCode;
 
 // ── Response ──────────────────────────────────────────────────────────────────
@@ -15,6 +16,11 @@ pub struct Response {
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub body: Body,
+    /// Extension map for out-of-band data (e.g. WebSocket upgrade callbacks).
+    ///
+    /// Not serialised over the wire — consumed by the connection layer before
+    /// encoding.  Default is empty; middleware and extractors may populate it.
+    pub extensions: Extensions,
 }
 
 impl Response {
@@ -24,6 +30,7 @@ impl Response {
             status,
             headers: HeaderMap::new(),
             body: Body::Empty,
+            extensions: Extensions::new(),
         }
     }
 
@@ -33,6 +40,7 @@ impl Response {
             status,
             headers: HeaderMap::new(),
             body: body.into(),
+            extensions: Extensions::new(),
         }
     }
 
