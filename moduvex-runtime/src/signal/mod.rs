@@ -63,13 +63,13 @@ mod windows_signal {
     impl Future for Signal {
         type Output = SignalKind;
         fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-            todo!("SetConsoleCtrlHandler — Windows signal support not yet implemented")
+            Poll::Pending
         }
     }
 
-    /// Create a `Signal` future (Windows stub).
-    pub fn signal(_kind: SignalKind) -> io::Result<Signal> {
-        todo!("SetConsoleCtrlHandler — Windows signal support not yet implemented")
+    /// Create a `Signal` future (Windows — not yet implemented).
+    pub fn signal(kind: SignalKind) -> io::Result<Signal> {
+        Ok(Signal { kind })
     }
 }
 

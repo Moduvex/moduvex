@@ -80,7 +80,7 @@ pub struct H2Connection {
     flow: FlowController,
     /// Highest stream ID seen from the client (for GOAWAY).
     last_stream_id: u32,
-    /// True after we have emitted GOAWAY.
+    /// True after GOAWAY has been sent or received (connection shutting down).
     pub goaway_sent: bool,
 }
 
@@ -170,6 +170,17 @@ impl H2Connection {
 
             Frame::Headers { stream_id, end_stream, end_headers, header_block } => {
                 self.last_stream_id = self.last_stream_id.max(stream_id);
+
+                // Enforce MAX_CONCURRENT_STREAMS (C1 fix: DoS prevention).
+                let active = self.streams.values().filter(|s| s.state.is_open()).count() as u32;
+                if !self.streams.contains_key(&stream_id) && active >= self.local_settings.max_concurrent_streams {
+                    return Err(H2Error::stream(
+                        stream_id,
+                        H2ErrorCode::RefusedStream,
+                        "MAX_CONCURRENT_STREAMS exceeded",
+                    ));
+                }
+
                 let win = self.remote_settings.initial_window_size;
                 let s = self.streams.entry(stream_id).or_insert_with(|| H2Stream::new(stream_id, win));
                 s.recv_headers()?;
@@ -312,6 +323,14 @@ impl H2Connection {
         if has_body {
             self.send_data(stream_id, &body_bytes, stream).await?;
         }
+
+        // Remove closed streams to prevent memory leaks (H4 fix).
+        if let Some(s) = self.streams.get(&stream_id) {
+            if matches!(s.state, StreamState::Closed) {
+                self.streams.remove(&stream_id);
+            }
+        }
+
         Ok(())
     }
 

@@ -37,6 +37,13 @@ pub enum StreamState {
     Closed,
 }
 
+impl StreamState {
+    /// Returns `true` if the stream is in an active state (not Idle or Closed).
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Open | Self::HalfClosedRemote | Self::HalfClosedLocal)
+    }
+}
+
 // ── H2Stream ──────────────────────────────────────────────────────────────────
 
 /// A single HTTP/2 stream owned by the connection manager.

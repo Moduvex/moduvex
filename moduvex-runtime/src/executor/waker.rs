@@ -68,9 +68,6 @@ pub(crate) struct WorkerNotifier {
     next: AtomicUsize,
 }
 
-// SAFETY: Mutex<Vec<i32>> and AtomicUsize are Send+Sync.
-unsafe impl Send for WorkerNotifier {}
-unsafe impl Sync for WorkerNotifier {}
 
 impl WorkerNotifier {
     pub(crate) fn new() -> Self {
@@ -115,9 +112,6 @@ struct WakerData {
     notifier: Option<Arc<WorkerNotifier>>,
 }
 
-// SAFETY: WakerData contains only Send+Sync types.
-unsafe impl Send for WakerData {}
-unsafe impl Sync for WakerData {}
 
 // ── Vtable functions ──────────────────────────────────────────────────────────
 
