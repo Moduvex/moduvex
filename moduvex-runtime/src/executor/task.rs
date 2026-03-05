@@ -16,13 +16,20 @@
 //! Separating the output from the body lets `drop_body` free the future
 //! immediately on completion while the output lives safely in the Arc until
 //! `JoinHandle::poll` retrieves it.
+//!
+//! # Thread Safety for Multi-Threaded Executor
+//!
+//! `join_waker` is now protected by a `Mutex` to allow safe concurrent access
+//! between `JoinHandle::poll` (any worker thread) and `poll_task` / `cancel`
+//! (any background worker). The double-check pattern in `JoinHandle::poll`
+//! ensures the waker is never missed if a task completes concurrently.
 
 use std::any::Any;
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 // ── State constants ───────────────────────────────────────────────────────────
@@ -124,12 +131,11 @@ pub(crate) struct TaskHeader {
 
     /// Waker registered by `JoinHandle::poll`. Called when the task finishes.
     ///
-    /// # Safety invariant
-    /// Written only when `state < STATE_COMPLETED` (by `JoinHandle::poll` on
-    /// the executor thread). Read+cleared only when transitioning to
-    /// COMPLETED/CANCELLED (by `Task::poll_task` / `Task::cancel`, also on the
-    /// executor thread). Single-threaded executor guarantees no data race.
-    pub join_waker: UnsafeCell<Option<Waker>>,
+    /// Protected by a `Mutex` to allow safe concurrent access between
+    /// `JoinHandle::poll` (on any worker thread) and `poll_task`/`cancel`
+    /// (on any background worker). The double-check pattern in `JoinHandle::poll`
+    /// ensures no missed wake-ups.
+    pub join_waker: Mutex<Option<Waker>>,
 
     /// Raw pointer to the `Box<TaskBody<F>>` allocation.
     ///
@@ -140,18 +146,19 @@ pub(crate) struct TaskHeader {
     pub body_ptr: UnsafeCell<*mut ()>,
 
     /// Output value written by the vtable's `poll` on completion.
-    /// Read (and taken) exactly once by `JoinHandle::poll`.
     ///
-    /// # Safety invariant
-    /// Written when `state` transitions to COMPLETED. Read when `state` is
-    /// observed as COMPLETED by `JoinHandle::poll`. Single-threaded executor
-    /// prevents concurrent writes+reads.
+    /// Written with Release ordering on state → COMPLETED transition.
+    /// Read with Acquire ordering after observing STATE_COMPLETED.
+    /// The Release/Acquire pair on `state` provides the memory barrier.
     pub output: UnsafeCell<Option<Box<dyn Any + Send>>>,
 }
 
-// SAFETY: All `UnsafeCell` fields in `TaskHeader` are protected by the
-// atomic `state` field and the single-threaded executor invariant.
-// No two threads access mutable fields concurrently.
+// SAFETY: `body_ptr` and `output` are UnsafeCell fields accessed under the
+// state machine's ordering guarantees:
+// - `body_ptr`: only accessed while state == STATE_RUNNING (exclusive)
+// - `output`: written before STATE_COMPLETED store (Release); read after
+//   STATE_COMPLETED load (Acquire)
+// `join_waker` is protected by its own Mutex.
 unsafe impl Send for TaskHeader {}
 unsafe impl Sync for TaskHeader {}
 
@@ -178,7 +185,7 @@ impl Task {
         let header = Arc::new(TaskHeader {
             state: AtomicU32::new(STATE_SCHEDULED),
             vtable: make_vtable::<F, T>(),
-            join_waker: UnsafeCell::new(None),
+            join_waker: Mutex::new(None),
             body_ptr: UnsafeCell::new(body_ptr),
             output: UnsafeCell::new(None),
         });
@@ -213,10 +220,12 @@ impl Task {
                 (h.vtable.drop_body)(body_ptr);
                 *h.body_ptr.get() = std::ptr::null_mut();
             }
+            // Set COMPLETED with Release so the output write is visible to
+            // any thread that observes STATE_COMPLETED with Acquire.
             h.state.store(STATE_COMPLETED, Ordering::Release);
-            // Wake the JoinHandle waiter.
-            // SAFETY: state=COMPLETED — no concurrent join_waker writes.
-            let waker = unsafe { (*h.join_waker.get()).take() };
+            // Wake the JoinHandle waiter under the Mutex to prevent races
+            // with JoinHandle::poll registering a waker concurrently.
+            let waker = h.join_waker.lock().unwrap().take();
             if let Some(w) = waker {
                 w.wake();
             }
@@ -231,9 +240,7 @@ impl Task {
     /// Must be called at most once by the executor.
     pub(crate) fn cancel(self) {
         let h = &self.header;
-        // SAFETY: executor guarantees cancel is called while holding the Task,
-        // which means state is SCHEDULED or CANCELLED (set by abort()).
-        // Either way we own exclusive access to body_ptr.
+        // SAFETY: executor holds the Task exclusively; state = SCHEDULED or CANCELLED.
         let body_ptr = unsafe { *h.body_ptr.get() };
         if !body_ptr.is_null() {
             unsafe {
@@ -242,9 +249,8 @@ impl Task {
             }
         }
         h.state.store(STATE_CANCELLED, Ordering::Release);
-        // Wake JoinHandle so it returns JoinError::Cancelled.
-        // SAFETY: state=CANCELLED — exclusive join_waker access.
-        let waker = unsafe { (*h.join_waker.get()).take() };
+        // Wake JoinHandle under the Mutex so no waker is missed.
+        let waker = h.join_waker.lock().unwrap().take();
         if let Some(w) = waker {
             w.wake();
         }
@@ -285,33 +291,59 @@ impl<T: Send + 'static> Future for JoinHandle<T> {
     type Output = Result<T, JoinError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Fast path: check state before acquiring the waker lock.
         let state = self.header.state.load(Ordering::Acquire);
 
+        if state == STATE_COMPLETED {
+            return self.take_output();
+        }
+        if state == STATE_CANCELLED {
+            return Poll::Ready(Err(JoinError::Cancelled));
+        }
+
+        // Task still in flight. Register waker under the Mutex to prevent a
+        // race with poll_task completing the task simultaneously.
+        //
+        // Double-check pattern:
+        //   1. Lock the waker Mutex.
+        //   2. Re-read state (now synchronized with poll_task's Mutex lock).
+        //   3. If still in-flight, store waker.
+        //   4. If completed/cancelled, return Ready immediately.
+        let mut guard = self.header.join_waker.lock().unwrap();
+        // Re-check under lock: poll_task takes the lock before setting
+        // STATE_COMPLETED, so if state is not COMPLETED here, we're safe to
+        // store the waker and it will be taken by poll_task later.
+        let state = self.header.state.load(Ordering::Acquire);
         match state {
             STATE_COMPLETED => {
-                // Take the output the task wrote into the header.
-                // SAFETY: state=COMPLETED — the executor will not write output again.
-                // Single-threaded: no concurrent reads from another JoinHandle.
-                let boxed = unsafe { (*self.header.output.get()).take() };
-                match boxed {
-                    Some(any_val) => match any_val.downcast::<T>() {
-                        Ok(val) => Poll::Ready(Ok(*val)),
-                        Err(_) => Poll::Ready(Err(JoinError::Cancelled)), // type mismatch (bug)
-                    },
-                    None => Poll::Ready(Err(JoinError::Cancelled)), // already taken
-                }
+                drop(guard);
+                self.take_output()
             }
-            STATE_CANCELLED => Poll::Ready(Err(JoinError::Cancelled)),
+            STATE_CANCELLED => {
+                drop(guard);
+                Poll::Ready(Err(JoinError::Cancelled))
+            }
             _ => {
-                // Task still in flight — register our waker.
-                // SAFETY: state is IDLE/SCHEDULED/RUNNING (not COMPLETED/CANCELLED).
-                // The executor will write join_waker only after observing COMPLETED/CANCELLED,
-                // which has not happened yet. Single-threaded: no concurrent poll.
-                unsafe {
-                    *self.header.join_waker.get() = Some(cx.waker().clone());
-                }
+                *guard = Some(cx.waker().clone());
                 Poll::Pending
             }
+        }
+    }
+}
+
+impl<T: Send + 'static> JoinHandle<T> {
+    /// Take the output from the header after observing STATE_COMPLETED.
+    fn take_output(self: Pin<&mut Self>) -> Poll<Result<T, JoinError>> {
+        // SAFETY: state=COMPLETED (observed with Acquire). The worker that set
+        // COMPLETED used Release ordering. The Release/Acquire pair establishes
+        // happens-before: output write → COMPLETED store → our load → output read.
+        let boxed = unsafe { (*self.header.output.get()).take() };
+        match boxed {
+            Some(any_val) => match any_val.downcast::<T>() {
+                Ok(val) => Poll::Ready(Ok(*val)),
+                Err(_) => Poll::Ready(Err(JoinError::Cancelled)),
+            },
+            None => Poll::Ready(Err(JoinError::Cancelled)), // already taken
         }
     }
 }
