@@ -16,8 +16,22 @@ use crate::server::tls::Stream;
 
 /// Read exactly `n` bytes from `stream` into a fresh `Vec<u8>`.
 pub(super) async fn read_exact(stream: &mut Stream, n: usize) -> Result<Vec<u8>, H2Error> {
+    read_exact_with_prefix(stream, n, &[]).await
+}
+
+/// Read exactly `n` bytes total, seeding the buffer with `prefix` bytes first.
+///
+/// Used for h2c connections where initial bytes were already peeked from the
+/// stream to detect the H2 preface. Reads `n - prefix.len()` remaining bytes.
+pub(super) async fn read_exact_with_prefix(
+    stream: &mut Stream,
+    n: usize,
+    prefix: &[u8],
+) -> Result<Vec<u8>, H2Error> {
+    let prefix_len = prefix.len().min(n);
     let mut buf = vec![0u8; n];
-    let mut pos = 0;
+    buf[..prefix_len].copy_from_slice(&prefix[..prefix_len]);
+    let mut pos = prefix_len;
     while pos < n {
         let chunk = poll_read(stream, &mut buf[pos..]).await.map_err(|e| {
             H2Error::connection(H2ErrorCode::InternalError, format!("io read: {e}"))

@@ -102,12 +102,15 @@ impl H2Connection {
 
     /// Exchange the HTTP/2 connection preface.
     ///
-    /// 1. Validate 24-byte client magic.
+    /// `pre_read` contains bytes already read from the wire (h2c peek path).
+    /// For TLS+ALPN connections, pass an empty slice.
+    ///
+    /// 1. Validate 24-byte client magic (combining pre_read + wire bytes).
     /// 2. Read the client's initial SETTINGS frame.
     /// 3. Send our SETTINGS + SETTINGS ACK.
-    pub async fn handle_preface(&mut self, stream: &mut Stream) -> Result<(), H2Error> {
-        // 1. Client magic
-        let magic = io::read_exact(stream, H2_PREFACE.len()).await?;
+    pub async fn handle_preface(&mut self, stream: &mut Stream, pre_read: &[u8]) -> Result<(), H2Error> {
+        // 1. Client magic — combine pre-read bytes with remaining wire bytes.
+        let magic = io::read_exact_with_prefix(stream, H2_PREFACE.len(), pre_read).await?;
         if magic != H2_PREFACE {
             return Err(H2Error::connection(
                 H2ErrorCode::ProtocolError,

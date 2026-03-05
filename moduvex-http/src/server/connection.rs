@@ -115,18 +115,22 @@ pub struct Connection {
     peer_addr: SocketAddr,
     config: ConnConfig,
     requests_served: u32,
+    /// Pre-read bytes from h2c preface peek (empty for normal H1 connections).
+    pre_read: Vec<u8>,
 }
 
 impl Connection {
-    pub fn new(stream: Stream, peer_addr: SocketAddr, config: ConnConfig) -> Self {
+    /// Create a connection. `pre_read` contains bytes already peeked from the stream
+    /// (used when h2c detection peeked bytes that turned out to be an H1 request).
+    pub fn new(stream: Stream, peer_addr: SocketAddr, config: ConnConfig, pre_read: Vec<u8>) -> Self {
         Self {
             stream: Some(stream),
             peer_addr,
             config,
             requests_served: 0,
+            pre_read,
         }
     }
-
 
     /// Run the connection loop with middleware support.
     ///
@@ -142,7 +146,12 @@ impl Connection {
         middlewares: &Arc<Vec<Arc<dyn Middleware>>>,
         req_extensions: &Option<StateInjector>,
     ) {
-        let mut read_buf: Vec<u8> = Vec::with_capacity(4096);
+        // Seed read buffer from pre-read bytes (h2c peek path); else start fresh.
+        let mut read_buf = if self.pre_read.is_empty() {
+            Vec::with_capacity(4096)
+        } else {
+            std::mem::take(&mut self.pre_read)
+        };
 
         loop {
             // 1. Read head — enforces idle_timeout between keep-alive requests.

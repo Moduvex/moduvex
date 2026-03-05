@@ -169,22 +169,42 @@ mod unix_impl {
 #[cfg(unix)]
 pub use unix_impl::{close_fd, create_pipe, set_nonblocking};
 
-// ── Windows stubs ─────────────────────────────────────────────────────────────
+// ── Windows implementations ───────────────────────────────────────────────────
 
 #[cfg(windows)]
 mod windows_impl {
     use super::*;
 
-    /// Set a handle to non-blocking mode (stub — requires WSA or IOCP).
-    pub fn set_nonblocking(_handle: RawSource) -> io::Result<()> {
-        // TODO: implement via ioctlsocket / SetNamedPipeHandleState
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "not yet implemented on Windows",
-        ))
+    /// Set a Winsock socket to non-blocking mode using `ioctlsocket(FIONBIO)`.
+    ///
+    /// `handle` is treated as a `SOCKET` (which is `usize` on 64-bit Windows).
+    ///
+    /// # Safety
+    /// Caller must ensure `handle` is a valid open socket descriptor.
+    pub fn set_nonblocking(handle: RawSource) -> io::Result<()> {
+        // FIONBIO with value 1 enables non-blocking mode on a Winsock socket.
+        let mut nonblocking: u32 = 1;
+        // SAFETY: `handle` is a valid SOCKET cast to isize (RawSource = HANDLE = isize).
+        // `ioctlsocket` is safe to call with a valid socket and FIONBIO command.
+        let ret = unsafe {
+            windows_sys::Win32::Networking::WinSock::ioctlsocket(
+                handle as usize, // SOCKET is usize on 64-bit Windows
+                windows_sys::Win32::Networking::WinSock::FIONBIO as i32,
+                &mut nonblocking,
+            )
+        };
+        if ret != 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
     }
 
-    /// Close an OS handle.
+    /// Close an OS handle via `CloseHandle`.
+    ///
+    /// # Safety
+    /// Caller must ensure `handle` is a valid, open HANDLE that has not been
+    /// closed already. After this call the handle is invalid.
     pub fn close_fd(handle: RawSource) -> io::Result<()> {
         // SAFETY: `handle` is a valid HANDLE. CloseHandle is the documented
         // way to release kernel resources associated with any HANDLE type.
@@ -196,13 +216,36 @@ mod windows_impl {
         }
     }
 
-    /// Create a pipe pair returning (read_handle, write_handle).
+    /// Create an anonymous pipe returning `(read_handle, write_handle)`.
+    ///
+    /// Uses `CreatePipe` with default security attributes (non-inheritable).
+    /// The returned handles are OS `HANDLE` values suitable for read/write.
+    ///
+    /// # Note
+    /// Anonymous pipes on Windows are not waitable via `WSAPoll` — they are
+    /// primarily used for the executor self-pipe wakeup mechanism where the
+    /// write side is signalled and the read side is drained. For reactor
+    /// readiness polling, prefer socket pairs or named pipes.
     pub fn create_pipe() -> io::Result<(RawSource, RawSource)> {
-        // TODO: implement via CreatePipe / anonymous pipe
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "not yet implemented on Windows",
-        ))
+        let mut read_handle: RawSource = 0;
+        let mut write_handle: RawSource = 0;
+        // SAFETY: Both handle pointers are valid stack variables. `CreatePipe`
+        // writes valid HANDLE values into them on success (return value != 0).
+        // NULL security attributes uses the default descriptor; pipe size 0
+        // uses the system default buffer size.
+        let ok = unsafe {
+            windows_sys::Win32::System::Pipes::CreatePipe(
+                &mut read_handle,
+                &mut write_handle,
+                std::ptr::null(), // default security attributes (non-inheritable)
+                0,                // default system buffer size
+            )
+        };
+        if ok == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok((read_handle, write_handle))
+        }
     }
 }
 

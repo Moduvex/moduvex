@@ -285,7 +285,7 @@ impl HttpServer {
                         drop(spawn(async move {
                             // Upgrade to TLS if configured; otherwise use plain TCP.
                             #[cfg(feature = "tls")]
-                            let stream = if let Some(ref acceptor) = *tls_acc {
+                            let mut stream = if let Some(ref acceptor) = *tls_acc {
                                 match with_timeout(
                                     TLS_HANDSHAKE_TIMEOUT,
                                     acceptor.accept(tcp_stream),
@@ -313,21 +313,29 @@ impl HttpServer {
                             };
 
                             #[cfg(not(feature = "tls"))]
-                            let stream = Stream::Plain(tcp_stream);
+                            let mut stream = Stream::Plain(tcp_stream);
 
-                            // Detect HTTP/2 via ALPN (TLS) or connection preface (h2c).
-                            // For TLS: check the negotiated ALPN protocol.
-                            // For plain TCP: h2c detection happens inside H1 Connection
-                            // via the preface peek path (not yet implemented — falls back to H1).
-                            let is_h2 = stream.alpn_protocol() == Some(b"h2");
+                            // Detect HTTP/2 via ALPN (TLS) or h2c preface (plain TCP).
+                            // TLS: ALPN negotiation already performed during handshake.
+                            // Plain TCP: read up to 24 bytes within 1s to detect H2 preface.
+                            let (is_h2, pre_read) = if stream.alpn_protocol() == Some(b"h2") {
+                                // TLS + ALPN h2 — no peek needed.
+                                (true, Vec::new())
+                            } else if matches!(stream, Stream::Plain(_)) {
+                                // h2c detection: read first bytes within 1s.
+                                h2_handler::detect_h2c_preface(&mut stream).await
+                            } else {
+                                // TLS without h2 ALPN — H1 path, no peek.
+                                (false, Vec::new())
+                            };
 
                             if is_h2 {
                                 h2_handler::run_h2_connection(
-                                    stream, peer_addr, &router, &mws, &inj,
+                                    stream, peer_addr, &router, &mws, &inj, pre_read,
                                 )
                                 .await;
                             } else {
-                                let conn = Connection::new(stream, peer_addr, config);
+                                let conn = Connection::new(stream, peer_addr, config, pre_read);
                                 conn.run(&router, &mws, &inj).await;
                             }
                             conns.fetch_sub(1, Ordering::AcqRel);
