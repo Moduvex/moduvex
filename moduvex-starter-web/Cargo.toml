@@ -8,11 +8,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-moduvex-runtime = { version = "0.1.0", path = "../moduvex-runtime" }
-moduvex-http = { version = "0.1.0", path = "../moduvex-http" }
-moduvex-core = { version = "0.1.0", path = "../moduvex-core" }
-moduvex-config = { version = "0.1.0", path = "../moduvex-config" }
-moduvex-observe = { version = "0.1.0", path = "../moduvex-observe" }
+moduvex-runtime = { version = "1.0.0", path = "../moduvex-runtime" }
+moduvex-http = { version = "1.0.0", path = "../moduvex-http" }
+moduvex-core = { version = "1.0.0", path = "../moduvex-core" }
+moduvex-config = { version = "1.0.0", path = "../moduvex-config" }
+moduvex-observe = { version = "1.0.0", path = "../moduvex-observe" }
 
 [features]
 default = []

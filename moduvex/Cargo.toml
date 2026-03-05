@@ -8,14 +8,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-moduvex-runtime = { version = "0.1.0", path = "../moduvex-runtime" }
-moduvex-core = { version = "0.1.0", path = "../moduvex-core" }
-moduvex-config = { version = "0.1.0", path = "../moduvex-config" }
-moduvex-http = { version = "0.1.0", path = "../moduvex-http", optional = true }
-moduvex-db = { version = "0.1.0", path = "../moduvex-db", optional = true }
-moduvex-observe = { version = "0.1.0", path = "../moduvex-observe" }
-moduvex-starter-web = { version = "0.1.0", path = "../moduvex-starter-web", optional = true }
-moduvex-starter-data = { version = "0.1.0", path = "../moduvex-starter-data", optional = true }
+moduvex-runtime = { version = "1.0.0", path = "../moduvex-runtime" }
+moduvex-core = { version = "1.0.0", path = "../moduvex-core" }
+moduvex-config = { version = "1.0.0", path = "../moduvex-config" }
+moduvex-http = { version = "1.0.0", path = "../moduvex-http", optional = true }
+moduvex-db = { version = "1.0.0", path = "../moduvex-db", optional = true }
+moduvex-observe = { version = "1.0.0", path = "../moduvex-observe" }
+moduvex-starter-web = { version = "1.0.0", path = "../moduvex-starter-web", optional = true }
+moduvex-starter-data = { version = "1.0.0", path = "../moduvex-starter-data", optional = true }
 
 [features]
 default = ["web", "data"]

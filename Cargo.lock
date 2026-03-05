@@ -402,7 +402,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "moduvex"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "moduvex-config",
  "moduvex-core",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "moduvex-config"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "toml",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "moduvex-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "moduvex-macros",
  "moduvex-runtime",
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "moduvex-db"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64ct",
  "hmac",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "moduvex-http"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "moduvex-core",
@@ -457,7 +457,7 @@ dependencies = [
 
 [[package]]
 name = "moduvex-macros"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "darling",
  "moduvex-core",
@@ -468,14 +468,14 @@ dependencies = [
 
 [[package]]
 name = "moduvex-observe"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "moduvex-runtime",
 ]
 
 [[package]]
 name = "moduvex-runtime"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "libc",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "moduvex-starter-data"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "moduvex-config",
  "moduvex-core",
@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "moduvex-starter-web"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "moduvex-config",
  "moduvex-core",
