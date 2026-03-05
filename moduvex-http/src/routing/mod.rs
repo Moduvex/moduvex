@@ -2,6 +2,7 @@
 
 pub mod method;
 pub mod path;
+pub(crate) mod radix;
 pub mod router;
 
 pub use method::Method;

@@ -1,7 +1,8 @@
-//! Type-safe HTTP router — method + path matching with param extraction.
+//! Type-safe HTTP router — method + path matching with radix-tree lookup.
 //!
-//! Uses a simple linear scan over registered routes (sufficient for typical
-//! apps with <100 routes). A radix tree optimisation can be added later.
+//! Uses a per-method radix tree for O(path_length) dispatch instead of a
+//! linear scan. Supports `:param` single-segment capture and `*wildcard`
+//! multi-segment capture. Priority: literal > param > wildcard.
 //!
 //! # Usage
 //! ```ignore
@@ -11,6 +12,7 @@
 //!     .post("/users", create_user);
 //! ```
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -19,7 +21,8 @@ use crate::extract::IntoHandler;
 use crate::request::Request;
 use crate::response::Response;
 use crate::routing::method::Method;
-use crate::routing::path::{match_path, parse_pattern, PathSegment};
+use crate::routing::path::parse_pattern;
+use crate::routing::radix::Node;
 
 // ── Handler type-erasure ───────────────────────────────────────────────────────
 
@@ -42,15 +45,6 @@ where
     Box::new(move |req| Box::pin(f(req)))
 }
 
-// ── Route ─────────────────────────────────────────────────────────────────────
-
-/// A single registered route entry.
-struct RouteEntry {
-    method: Method,
-    segments: Vec<PathSegment>,
-    handler: Arc<BoxHandler>,
-}
-
 // ── Match result ──────────────────────────────────────────────────────────────
 
 /// Result of a successful router lookup.
@@ -63,9 +57,14 @@ pub struct RouteMatch<'r> {
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-/// HTTP router: maps (method, path) → handler.
+/// HTTP router: maps (method, path) → handler via per-method radix trees.
+///
+/// Each HTTP method has its own radix tree so lookups never need to filter by
+/// method — the tree is selected first, then the path is resolved in O(depth).
 pub struct Router {
-    routes: Vec<RouteEntry>,
+    /// One radix tree per HTTP method.
+    trees: HashMap<Method, Node>,
+    /// Optional catch-all handler for unmatched requests.
     fallback: Option<Arc<BoxHandler>>,
 }
 
@@ -73,20 +72,21 @@ impl Router {
     /// Create an empty router.
     pub fn new() -> Self {
         Self {
-            routes: Vec::new(),
+            trees: HashMap::new(),
             fallback: None,
         }
     }
 
-    // ── Route registration (extractor-aware) ──────────────────────────────
+    // ── Route registration ─────────────────────────────────────────────────
 
     /// Register a route for an arbitrary method.
     pub fn route<T>(mut self, method: Method, pattern: &str, handler: impl IntoHandler<T>) -> Self {
-        self.routes.push(RouteEntry {
-            method,
-            segments: parse_pattern(pattern),
-            handler: Arc::new(handler.into_box_handler()),
-        });
+        let segments = parse_pattern(pattern);
+        let handler = Arc::new(handler.into_box_handler());
+        self.trees
+            .entry(method)
+            .or_insert_with(Node::new_root)
+            .insert(&segments, handler);
         self
     }
 
@@ -120,18 +120,25 @@ impl Router {
         self
     }
 
-    /// Mount a sub-router under `prefix`. All sub-routes are prefixed.
+    /// Mount a sub-router under `prefix`. All sub-routes are re-inserted with
+    /// the prefix prepended. This flattens the mounted router at insertion time
+    /// so the radix tree sees complete paths — no special "mount" logic needed
+    /// at lookup time.
     pub fn nest(mut self, prefix: &str, other: Router) -> Self {
         let prefix = prefix.trim_end_matches('/');
-        for entry in other.routes {
+        // Walk the other router's trees and re-insert every route into self.
+        for (method, root) in other.trees {
+            let self_root = self.trees.entry(method).or_insert_with(Node::new_root);
+            // Flatten: collect all (segments, handler) pairs from the sub-tree.
+            let mut routes: Vec<(Vec<crate::routing::path::PathSegment>, Arc<BoxHandler>)> =
+                Vec::new();
+            collect_routes(&root, &mut Vec::new(), &mut routes);
             let prefix_segs = parse_pattern(prefix);
-            let mut merged = prefix_segs;
-            merged.extend(entry.segments);
-            self.routes.push(RouteEntry {
-                method: entry.method,
-                segments: merged,
-                handler: entry.handler,
-            });
+            for (sub_segs, handler) in routes {
+                let mut full_segs = prefix_segs.clone();
+                full_segs.extend(sub_segs);
+                self_root.insert(&full_segs, handler);
+            }
         }
         self
     }
@@ -151,24 +158,19 @@ impl Router {
         None
     }
 
-    fn lookup_method<'r>(&'r self, method: Method, path: &str) -> Option<RouteMatch<'r>> {
-        for entry in &self.routes {
-            if entry.method != method {
-                continue;
-            }
-            if let Some(params) = match_path(&entry.segments, path) {
-                return Some(RouteMatch {
-                    handler: &entry.handler,
-                    params,
-                });
-            }
-        }
-        None
-    }
-
     /// Get the fallback handler (if any).
     pub fn fallback_handler(&self) -> Option<&Arc<BoxHandler>> {
         self.fallback.as_ref()
+    }
+
+    // ── Internal ───────────────────────────────────────────────────────────
+
+    fn lookup_method<'r>(&'r self, method: Method, path: &str) -> Option<RouteMatch<'r>> {
+        let tree = self.trees.get(&method)?;
+        let parts = split_path(path);
+        let mut params = Vec::new();
+        let handler = tree.lookup(&parts, &mut params)?;
+        Some(RouteMatch { handler, params })
     }
 }
 
@@ -177,6 +179,38 @@ impl Default for Router {
         Self::new()
     }
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Split a URL path into non-empty segments, stripping the leading slash.
+fn split_path(path: &str) -> Vec<&str> {
+    let p = path.trim_start_matches('/');
+    if p.is_empty() {
+        vec![]
+    } else {
+        p.split('/').collect()
+    }
+}
+
+/// Recursively collect all (full_segment_path, handler) pairs from a subtree.
+///
+/// Used by `nest()` to flatten a mounted router's routes before re-insertion.
+fn collect_routes(
+    node: &Node,
+    current: &mut Vec<crate::routing::path::PathSegment>,
+    out: &mut Vec<(Vec<crate::routing::path::PathSegment>, Arc<BoxHandler>)>,
+) {
+    if let Some(h) = &node.handler {
+        out.push((current.clone(), h.clone()));
+    }
+    node.visit_children(|child_seg, child_node| {
+        current.push(child_seg);
+        collect_routes(child_node, current, out);
+        current.pop();
+    });
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -247,7 +281,6 @@ mod tests {
         let router = Router::new()
             .get("/hello", ok_handler)
             .fallback(ok_handler);
-        // Fallback is set
         assert!(router.fallback_handler().is_some());
     }
 
@@ -301,7 +334,6 @@ mod tests {
     #[test]
     fn head_without_get_route_returns_none() {
         let router = Router::new().post("/data", ok_handler);
-        // HEAD falls back to GET only; no GET registered → no match
         assert!(router.lookup(Method::HEAD, "/data").is_none());
     }
 

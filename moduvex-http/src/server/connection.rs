@@ -1,10 +1,18 @@
 //! Per-connection state machine — reads requests, dispatches handlers, writes responses.
 //!
 //! State flow: Reading → Dispatching → Writing → (keep-alive? Reading | Closing)
+//!
+//! # Timeouts
+//! - `idle_timeout`: max wait between keep-alive requests (protects against slow-loris).
+//! - `read_timeout`: max time to receive the full request head once data starts arriving.
+//! - `write_timeout`: max time allowed to flush the full response.
 
+use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Poll;
+use std::time::Duration;
 
 use moduvex_runtime::net::{AsyncRead, AsyncWrite, TcpStream};
 
@@ -23,13 +31,23 @@ use crate::status::StatusCode;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-/// Per-connection configuration limits.
+/// Per-connection configuration limits and timeouts.
 #[derive(Debug, Clone)]
 pub struct ConnConfig {
     pub max_read_buf: usize,
     pub max_body_size: u64,
     pub max_requests: u32,
     pub parse_limits: ParseLimits,
+    /// Max idle time between keep-alive requests before closing (default: 5s).
+    /// Protects against slow-loris: connection must send a new request head
+    /// within this window or it is closed.
+    pub idle_timeout: Duration,
+    /// Max time to receive and parse the full request head once data starts
+    /// arriving (default: 60s). Guards against partial-request stalls.
+    pub read_timeout: Duration,
+    /// Max time to flush the full response to the client (default: 30s).
+    /// Guards against stalled client reads that would hold the connection open.
+    pub write_timeout: Duration,
 }
 
 impl Default for ConnConfig {
@@ -39,8 +57,37 @@ impl Default for ConnConfig {
             max_body_size: 2 * 1024 * 1024,
             max_requests: 1000,
             parse_limits: ParseLimits::default(),
+            idle_timeout: Duration::from_secs(5),
+            read_timeout: Duration::from_secs(60),
+            write_timeout: Duration::from_secs(30),
         }
     }
+}
+
+// ── Timeout helper ────────────────────────────────────────────────────────────
+
+/// Race a future against a sleep deadline using the runtime timer wheel.
+///
+/// Returns `Ok(output)` if the future completes first, or `Err(())` if the
+/// timeout elapses first. Built on `moduvex_runtime::sleep` — no tokio.
+pub(crate) async fn with_timeout<F>(dur: Duration, fut: F) -> Result<F::Output, ()>
+where
+    F: Future,
+{
+    let mut fut = std::pin::pin!(fut);
+    let mut sleep = std::pin::pin!(moduvex_runtime::sleep(dur));
+    std::future::poll_fn(|cx| {
+        // Poll the user future first — completion wins.
+        if let Poll::Ready(v) = fut.as_mut().poll(cx) {
+            return Poll::Ready(Ok(v));
+        }
+        // Check timer — if elapsed, signal timeout.
+        if let Poll::Ready(()) = sleep.as_mut().poll(cx) {
+            return Poll::Ready(Err(()));
+        }
+        Poll::Pending
+    })
+    .await
 }
 
 // ── Parsed head (owned) ───────────────────────────────────────────────────────
@@ -77,6 +124,13 @@ impl Connection {
     }
 
     /// Run the connection loop with middleware support.
+    ///
+    /// Each iteration:
+    /// 1. Wait for the next request head (guarded by `idle_timeout`).
+    /// 2. Read the body.
+    /// 3. Dispatch through the middleware/router pipeline.
+    /// 4. Write the response (guarded by `write_timeout`).
+    /// 5. Repeat if keep-alive, else close.
     pub async fn run(
         mut self,
         router: &Router,
@@ -86,10 +140,15 @@ impl Connection {
         let mut read_buf: Vec<u8> = Vec::with_capacity(4096);
 
         loop {
-            // 1. Read head
-            let head = match self.read_head(&mut read_buf).await {
-                Ok(h) => h,
-                Err(_) => break,
+            // 1. Read head — enforces idle_timeout between keep-alive requests.
+            //    This is the primary defense against slow-loris: a client that
+            //    never sends the next request head gets disconnected.
+            let head = match with_timeout(self.config.idle_timeout, self.read_head(&mut read_buf))
+                .await
+            {
+                Ok(Ok(h)) => h,
+                // Timeout OR read/parse error — close the connection.
+                Ok(Err(_)) | Err(()) => break,
             };
 
             let head_len = head.head_len;
@@ -175,7 +234,8 @@ impl Connection {
                 && version == HttpVersion::Http11
                 && self.requests_served < self.config.max_requests;
 
-            // 6. Encode and send
+            // 6. Encode and send — guarded by write_timeout to prevent stalled clients
+            //    from holding the connection open indefinitely.
             let mut out = Vec::with_capacity(512);
             let mut resp = response;
             if keep_alive {
@@ -185,7 +245,10 @@ impl Connection {
             }
             encode_response(resp, &mut out);
 
-            if self.write_all(&out).await.is_err() {
+            if with_timeout(self.config.write_timeout, self.write_all(&out))
+                .await
+                .is_err()
+            {
                 break;
             }
             if !keep_alive {
@@ -380,4 +443,82 @@ fn has_chunked_terminator(buf: &[u8]) -> bool {
     }
 
     buf.windows(5).any(|w| w == b"0\r\n\r\n")
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn conn_config_default_has_timeout_fields() {
+        let cfg = ConnConfig::default();
+        assert_eq!(cfg.idle_timeout, Duration::from_secs(5));
+        assert_eq!(cfg.read_timeout, Duration::from_secs(60));
+        assert_eq!(cfg.write_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn conn_config_custom_timeouts() {
+        let cfg = ConnConfig {
+            idle_timeout: Duration::from_secs(10),
+            read_timeout: Duration::from_secs(120),
+            write_timeout: Duration::from_secs(45),
+            ..ConnConfig::default()
+        };
+        assert_eq!(cfg.idle_timeout, Duration::from_secs(10));
+        assert_eq!(cfg.read_timeout, Duration::from_secs(120));
+        assert_eq!(cfg.write_timeout, Duration::from_secs(45));
+    }
+
+    #[test]
+    fn conn_config_clone() {
+        let cfg = ConnConfig::default();
+        let cfg2 = cfg.clone();
+        assert_eq!(cfg.idle_timeout, cfg2.idle_timeout);
+    }
+
+    #[test]
+    fn with_timeout_future_completes_before_deadline() {
+        // Future that resolves immediately should win before the 1s timeout.
+        moduvex_runtime::block_on(async {
+            let result = with_timeout(Duration::from_secs(1), async { 42u32 }).await;
+            assert_eq!(result, Ok(42u32));
+        });
+    }
+
+    #[test]
+    fn with_timeout_fires_when_future_is_slow() {
+        // Sleep for 200ms; timeout is 50ms — timeout should win.
+        moduvex_runtime::block_on(async {
+            let start = Instant::now();
+            let result = with_timeout(
+                Duration::from_millis(50),
+                moduvex_runtime::sleep(Duration::from_millis(200)),
+            )
+            .await;
+            assert_eq!(result, Err(()));
+            // Verify we didn't wait the full 200ms.
+            assert!(
+                start.elapsed() < Duration::from_millis(180),
+                "timeout fired too late: {:?}",
+                start.elapsed()
+            );
+        });
+    }
+
+    #[test]
+    fn with_timeout_returns_ok_on_fast_future() {
+        // Future finishes in 10ms; timeout is 500ms — should return Ok.
+        moduvex_runtime::block_on(async {
+            let result = with_timeout(
+                Duration::from_millis(500),
+                moduvex_runtime::sleep(Duration::from_millis(10)),
+            )
+            .await;
+            assert_eq!(result, Ok(()));
+        });
+    }
 }

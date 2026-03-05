@@ -10,6 +10,7 @@ pub mod prepared;
 pub mod wire;
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use moduvex_runtime::net::TcpStream;
 
@@ -76,6 +77,8 @@ pub struct PgConnection {
     stream: TcpStream,
     /// Server parameters received during startup (e.g. `server_version`).
     params: HashMap<String, String>,
+    /// When this connection was first opened (set once, never reset).
+    pub(crate) created_at: Instant,
 }
 
 impl PgConnection {
@@ -125,7 +128,7 @@ impl PgConnection {
                     params.insert(name, value);
                 }
                 BackendMessage::ReadyForQuery { .. } => {
-                    return Ok(PgConnection { stream, params });
+                    return Ok(PgConnection { stream, params, created_at: Instant::now() });
                 }
                 BackendMessage::ErrorResponse { code, message, detail } => {
                     return Err(DbError::ServerError { code, message, detail });

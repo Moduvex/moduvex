@@ -235,6 +235,7 @@ dependencies = [
 name = "moduvex-http"
 version = "0.1.0"
 dependencies = [
+ "moduvex-core",
  "moduvex-runtime",
  "rustls",
  "rustls-pemfile",
