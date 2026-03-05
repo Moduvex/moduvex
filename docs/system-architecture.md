@@ -49,16 +49,19 @@ Moduvex is a **layered, modular backend framework** with zero external async run
 ### Layer 1: Foundation (No Internal Dependencies)
 
 #### moduvex-runtime
-**Purpose:** Custom async runtime with platform-native I/O multiplexing.
+**Purpose:** Custom async runtime with platform-native I/O multiplexing (zero tokio dependency).
 
 **Key Modules:**
 - `executor` — Task scheduler, spawn, block_on, task-local storage
-- `reactor` — Event loop (epoll/kqueue/IOCP poll cycle)
+- `reactor` — Event loop with platform-native multiplexing:
+  - **Linux:** epoll (Level 2 syscall, O(1) per event)
+  - **macOS/BSD:** kqueue (Level 1 syscall, supports files + sockets)
+  - **Windows:** WSAPoll (replaces IOCP stub in Wave 9)
 - `net` — Async TCP/UDP sockets built on reactor
 - `time` — Hierarchical timer wheel, sleep, intervals
-- `sync` — Mutex, mpsc, oneshot channels
-- `signal` — Unix signal handling
-- `platform` — OS-specific abstractions (epoll struct, kqueue syscalls)
+- `sync` — Mutex, mpsc, oneshot channels (lock-free where possible)
+- `signal` — Unix signal handling (SIGTERM, SIGINT, etc.)
+- `platform` — OS-specific abstractions
 
 **Design Rationale:**
 - **Zero tokio dependency** reduces transitive deps and binary size
@@ -161,48 +164,69 @@ Phase 7: Stopped     Close pools, listeners, flush logs
 On error in any phase → auto-rollback to Stopped (deterministic).
 
 #### moduvex-http
-**Purpose:** Custom HTTP/1.1 server built entirely on moduvex-runtime.
+**Purpose:** Custom HTTP/1.1 + HTTP/2 server built entirely on moduvex-runtime.
 
-**Request Pipeline:**
+**Protocol Detection & Handling:**
 ```
 TCP Accept
     │
-    ├─ Connection{ reader, writer }
+    ├─ TLS Handshake (if configured)
+    │   ├─ ALPN negotiation (h2 or http/1.1)
+    │   └─ Certificate validation
     │
-    ├─ HttpParser::parse_request (zero-copy)
-    │   └─ Returns Request{ method, path, headers, body }
+    ├─ Protocol Detection (h2c via preface)
+    │   └─ HTTP/2 Preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
     │
-    ├─ Router::match(path, method)
-    │   └─ Pattern matching: "/users/:id" matches "/users/42"
+    ├─ HTTP/1.1 Request Pipeline
+    │   ├─ HttpParser::parse_request (zero-copy)
+    │   ├─ Router::match(path, method)
+    │   ├─ Middleware chain (pre-handler)
+    │   ├─ Handler invocation + response generation
+    │   ├─ Middleware chain (post-handler)
+    │   └─ TCP write + keep-alive
     │
-    ├─ Middleware chain (pre-handler)
-    │   └─ Each middleware can modify request or short-circuit
-    │
-    ├─ Handler invocation
-    │   └─ Extractors: Path<UserId>, Json<Body>, State<AppContext>
-    │
-    ├─ Response generation
-    │   └─ IntoResponse trait (String → text, struct → JSON, etc.)
-    │
-    ├─ Middleware chain (post-handler)
-    │   └─ Each middleware can modify response
-    │
-    └─ TCP write + keep-alive decision
+    └─ HTTP/2 Multiplexing Pipeline
+        ├─ Frame codec (RFC 9113)
+        │   └─ DATA, HEADERS, SETTINGS, GOAWAY, etc.
+        ├─ HPACK decompression (RFC 7541)
+        ├─ Stream state machine (per stream)
+        │   ├─ Idle → Open → Reserved → Closed
+        │   └─ Flow control (window-based)
+        ├─ Per-stream handler invocation (concurrent)
+        │   └─ Each stream → own Request/Response cycle
+        ├─ Response encoding (HPACK compression)
+        └─ Multiplexed frame transmission
 ```
 
 **Key Components:**
 - `Request` — Immutable HTTP request snapshot
 - `Response` — Builder for status, headers, body
-- `Router` — Radix tree matching for O(log n) route lookup
+- `Router` — Radix tree matching for O(path_len) route lookup
 - `Middleware` — Async closures that wrap handlers
 - `Extractors` — `FromRequest` trait for type-safe param extraction
+- `H2FrameCodec` — RFC 9113 frame parsing/encoding
+- `HpackEncoder/Decoder` — RFC 7541 header compression
+- `H2Stream` — Per-stream state machine
+- `H2Connection` — Multiplexer for concurrent streams
 
-**Handler Signature:**
+**Protocol Modules:**
+- `protocol/h1/` — HTTP/1.1 parser, encoder, chunked transfer
+- `protocol/h2/` — HTTP/2 frame codec, HPACK, flow control, stream machine
+
+**Handler Signature (Protocol Agnostic):**
 ```rust
 async fn handler(Path(id): Path<UserId>, State(ctx): State<AppContext>) -> Response {
-    // Extractor types are validated at registration time
+    // Same handler works for HTTP/1.1 and HTTP/2
 }
 ```
+
+**Middleware Highlights:**
+- Request ID middleware (correlation across protocols)
+- W3C traceparent tracing (distributed tracing)
+- CORS (origin validation)
+- Static file serving
+- WebSocket upgrade (HTTP/1.1 + HTTP/2)
+- Form/multipart parsing
 
 #### moduvex-observe
 **Purpose:** Structured logging, distributed tracing, lock-free metrics, health checks.
@@ -379,10 +403,14 @@ moduvex-starter-web = "0.1"
 - **Arc clones** → cheap reference sharing
 - **Predictable performance** → no contention
 
-### Why HTTP/1.1 Only (for now)?
-- **Simpler** — no framing headers, request-response semantics clear
-- **Sufficient** — most microservices don't need HTTP/2 multiplexing
-- **Foundation** — HTTP/2 added later without breaking Layer 1
+### HTTP/1.1 + HTTP/2 Dual Support
+- **HTTP/1.1** — Foundation protocol, proven, simplest semantics
+- **HTTP/2** — Multiplexing, header compression (HPACK), flow control
+- **Protocol Selection:**
+  - TLS: ALPN negotiation (h2 preferred, fallback h1)
+  - Plain TCP: HTTP/2 preface detection (h2c), fallback h1
+- **Handler Agnostic** — Same business logic works for both protocols
+- **Backward Compatible** — Existing HTTP/1.1 code unchanged
 
 ## Performance Model
 
@@ -448,5 +476,7 @@ impl<'a> FromRequest<'a> for MyCustomType {
 
 ---
 
-**Last Updated:** Phase 8 (Documentation)
+**Status:** Wave 9 Complete — HTTP/2 + Windows WSAPoll reactor fully integrated.
+
+**Last Updated:** Waves 7-9 complete (Mar 2026)
 **Audience:** Developers, architects
