@@ -44,9 +44,8 @@ mod tests {
 
     #[test]
     fn extract_valid_section() {
-        let root: toml::Value = "[server]\nport = 8080\nhost = \"localhost\"\n"
-            .parse()
-            .unwrap();
+        let root: toml::Value =
+            toml::from_str("[server]\nport = 8080\nhost = \"localhost\"\n").unwrap();
         let cfg: Arc<ServerConfig> = extract_section(&root, "server").unwrap();
         assert_eq!(cfg.port, 8080);
         assert_eq!(cfg.host, "localhost");
@@ -54,14 +53,14 @@ mod tests {
 
     #[test]
     fn missing_section_returns_error() {
-        let root: toml::Value = "[other]\nkey = 1\n".parse().unwrap();
+        let root: toml::Value = toml::from_str("[other]\nkey = 1\n").unwrap();
         let result = extract_section::<ServerConfig>(&root, "server");
         assert!(matches!(result, Err(ConfigError::MissingSection { .. })));
     }
 
     #[test]
     fn wrong_type_returns_deserialize_error() {
-        let root: toml::Value = "[server]\nport = \"not_a_number\"\n".parse().unwrap();
+        let root: toml::Value = toml::from_str("[server]\nport = \"not_a_number\"\n").unwrap();
         let result = extract_section::<ServerConfig>(&root, "server");
         assert!(matches!(result, Err(ConfigError::Deserialize { .. })));
     }

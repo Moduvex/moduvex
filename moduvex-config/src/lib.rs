@@ -69,12 +69,10 @@ impl ConfigLoader {
     /// an `app.toml` file. Env var overrides are still applied.
     pub fn from_defaults(defaults: &str) -> Result<Self, ConfigError> {
         let base: toml::Value =
-            defaults
-                .parse()
-                .map_err(|e: toml::de::Error| ConfigError::Parse {
-                    path: "<defaults>".into(),
-                    source: e.to_string(),
-                })?;
+            toml::from_str(defaults).map_err(|e: toml::de::Error| ConfigError::Parse {
+                path: "<defaults>".into(),
+                source: e.to_string(),
+            })?;
         let merged = merge::merge_env_overrides(base);
         Ok(Self {
             root: merged,
@@ -87,12 +85,10 @@ impl ConfigLoader {
     /// Merge order: defaults → file → profile overlay → env vars.
     pub fn load_with_defaults(defaults: &str, name: &str, dir: &Path) -> Result<Self, ConfigError> {
         let default_val: toml::Value =
-            defaults
-                .parse()
-                .map_err(|e: toml::de::Error| ConfigError::Parse {
-                    path: "<defaults>".into(),
-                    source: e.to_string(),
-                })?;
+            toml::from_str(defaults).map_err(|e: toml::de::Error| ConfigError::Parse {
+                path: "<defaults>".into(),
+                source: e.to_string(),
+            })?;
         let profile = Profile::from_env();
         // Try loading file; if missing, just use defaults
         let file_val = loader::load_toml(dir, name, &profile);

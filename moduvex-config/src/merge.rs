@@ -92,7 +92,7 @@ mod tests {
     fn merge_env_creates_section_and_field() {
         // Set env var for this test
         std::env::set_var("MODUVEX__TESTMERGE__PORT", "9090");
-        let base: Value = "[testmerge]\nhost = \"localhost\"\n".parse().unwrap();
+        let base: Value = toml::from_str("[testmerge]\nhost = \"localhost\"\n").unwrap();
         let merged = merge_env_overrides(base);
         let section = merged["testmerge"].as_table().unwrap();
         assert_eq!(section["port"].as_integer().unwrap(), 9090);
