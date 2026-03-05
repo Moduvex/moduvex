@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
-use moduvex_runtime::net::{AsyncRead, AsyncWrite, TcpStream};
+use moduvex_runtime::net::{AsyncRead, AsyncWrite};
+
+use crate::server::tls::Stream;
 
 use crate::body::Body;
 use crate::header::HeaderMap;
@@ -105,16 +107,16 @@ struct OwnedHead {
 
 // ── Connection ────────────────────────────────────────────────────────────────
 
-/// Drives a single TCP connection through the HTTP request/response cycle.
+/// Drives a single connection (plain TCP or TLS) through the HTTP request/response cycle.
 pub struct Connection {
-    stream: TcpStream,
+    stream: Stream,
     peer_addr: SocketAddr,
     config: ConnConfig,
     requests_served: u32,
 }
 
 impl Connection {
-    pub fn new(stream: TcpStream, peer_addr: SocketAddr, config: ConnConfig) -> Self {
+    pub fn new(stream: Stream, peer_addr: SocketAddr, config: ConnConfig) -> Self {
         Self {
             stream,
             peer_addr,

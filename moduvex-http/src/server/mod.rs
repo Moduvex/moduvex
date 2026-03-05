@@ -53,6 +53,7 @@ use crate::routing::router::Router;
 
 use connection::{with_timeout, ConnConfig, Connection};
 use listener::Listener;
+use tls::Stream;
 
 /// Type alias for the state injector function.
 type StateInjector = Arc<dyn Fn(&mut Request) + Send + Sync>;
@@ -202,7 +203,13 @@ impl HttpServer {
     pub fn serve(self) -> std::io::Result<()> {
         let listener = Listener::bind(self.addr)?;
         let actual_addr = listener.local_addr();
-        eprintln!("moduvex-http: listening on http://{actual_addr}");
+
+        #[cfg(feature = "tls")]
+        let scheme = if self.tls_config.is_some() { "https" } else { "http" };
+        #[cfg(not(feature = "tls"))]
+        let scheme = "http";
+
+        eprintln!("moduvex-http: listening on {scheme}://{actual_addr}");
 
         let router = Arc::new(self.router);
         let config = self.config;
@@ -216,6 +223,29 @@ impl HttpServer {
         // calls `request()` on the internal handle is equivalent to the old
         // infinite-loop behaviour — the server only exits on process kill.
         let shutdown = self.shutdown_handle.unwrap_or_default();
+
+        // Build the TLS acceptor once (outside the async block to avoid moving
+        // self.tls_config into a non-Send context).
+        #[cfg(feature = "tls")]
+        let tls_acceptor: Option<tls::TlsAcceptor> = match self.tls_config {
+            Some(cfg) => match tls::TlsAcceptor::new(cfg) {
+                Ok(a) => Some(a),
+                Err(e) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("TLS config error: {e}"),
+                    ));
+                }
+            },
+            None => None,
+        };
+        // Wrap in Arc so it can be cloned into each spawned connection task.
+        #[cfg(feature = "tls")]
+        let tls_acceptor = Arc::new(tls_acceptor);
+
+        /// Default TLS handshake timeout — reject slow / non-TLS clients.
+        #[cfg(feature = "tls")]
+        const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
         block_on_with_spawn(async move {
             let active_conns = Arc::new(AtomicUsize::new(0));
@@ -239,14 +269,51 @@ impl HttpServer {
                 // Race accept() against a short poll interval. On timeout we
                 // loop back to the shutdown check without blocking forever.
                 match with_timeout(ACCEPT_POLL_INTERVAL, listener.accept()).await {
-                    Ok(Ok((stream, peer_addr))) => {
+                    Ok(Ok((tcp_stream, peer_addr))) => {
                         let router = Arc::clone(&router);
                         let config = config.clone();
                         let mws = Arc::clone(&middlewares);
                         let inj = state_injector.clone();
                         let conns = Arc::clone(&active_conns);
+
+                        // Clone TLS acceptor (Arc clone — cheap).
+                        #[cfg(feature = "tls")]
+                        let tls_acc = Arc::clone(&tls_acceptor);
+
                         conns.fetch_add(1, Ordering::AcqRel);
                         drop(spawn(async move {
+                            // Upgrade to TLS if configured; otherwise use plain TCP.
+                            #[cfg(feature = "tls")]
+                            let stream = if let Some(ref acceptor) = *tls_acc {
+                                match with_timeout(
+                                    TLS_HANDSHAKE_TIMEOUT,
+                                    acceptor.accept(tcp_stream),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(tls)) => Stream::Tls(Box::new(tls)),
+                                    Ok(Err(e)) => {
+                                        eprintln!(
+                                            "moduvex-http: TLS handshake error from {peer_addr}: {e}"
+                                        );
+                                        conns.fetch_sub(1, Ordering::AcqRel);
+                                        return;
+                                    }
+                                    Err(()) => {
+                                        eprintln!(
+                                            "moduvex-http: TLS handshake timeout from {peer_addr}"
+                                        );
+                                        conns.fetch_sub(1, Ordering::AcqRel);
+                                        return;
+                                    }
+                                }
+                            } else {
+                                Stream::Plain(tcp_stream)
+                            };
+
+                            #[cfg(not(feature = "tls"))]
+                            let stream = Stream::Plain(tcp_stream);
+
                             let conn = Connection::new(stream, peer_addr, config);
                             conn.run(&router, &mws, &inj).await;
                             conns.fetch_sub(1, Ordering::AcqRel);

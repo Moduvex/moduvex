@@ -64,6 +64,17 @@ impl Drop for TcpStream {
     }
 }
 
+#[cfg(unix)]
+impl std::os::unix::io::AsRawFd for TcpStream {
+    /// Return the underlying file descriptor.
+    ///
+    /// The fd remains valid for the lifetime of this `TcpStream`. Callers
+    /// must not close or duplicate it without coordinating with the owner.
+    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
+        self.source.raw()
+    }
+}
+
 // ── AsyncRead ─────────────────────────────────────────────────────────────────
 
 impl AsyncRead for TcpStream {
