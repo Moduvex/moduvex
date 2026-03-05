@@ -18,6 +18,7 @@ pub mod listener;
 pub mod tls;
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use moduvex_runtime::{block_on_with_spawn, spawn};
@@ -44,6 +45,8 @@ pub struct HttpServer {
     middlewares: Vec<Arc<dyn Middleware>>,
     /// Type-erased state injector — inserts T into each request's extensions.
     state_injector: Option<StateInjector>,
+    /// Maximum number of concurrent connections (0 = unlimited).
+    max_connections: usize,
     #[cfg(feature = "tls")]
     tls_config: Option<tls::TlsConfig>,
 }
@@ -61,6 +64,7 @@ impl HttpServer {
             config: ConnConfig::default(),
             middlewares: Vec::new(),
             state_injector: None,
+            max_connections: 0,
             #[cfg(feature = "tls")]
             tls_config: None,
         }
@@ -122,6 +126,12 @@ impl HttpServer {
         self
     }
 
+    /// Set maximum concurrent connections (default: unlimited).
+    pub fn max_connections(mut self, limit: usize) -> Self {
+        self.max_connections = limit;
+        self
+    }
+
     /// Set TLS configuration (requires `tls` feature).
     #[cfg(feature = "tls")]
     pub fn tls(mut self, config: tls::TlsConfig) -> Self {
@@ -140,22 +150,36 @@ impl HttpServer {
         let middlewares = Arc::new(self.middlewares);
         let state_injector = self.state_injector;
 
+        let max_conns = self.max_connections;
+
         block_on_with_spawn(async move {
+            let active_conns = Arc::new(AtomicUsize::new(0));
+
             loop {
+                // Enforce connection limit (0 = unlimited).
+                if max_conns > 0 && active_conns.load(Ordering::Acquire) >= max_conns {
+                    // Yield to let existing connections make progress and close.
+                    moduvex_runtime::sleep(std::time::Duration::from_millis(1)).await;
+                    continue;
+                }
+
                 match listener.accept().await {
                     Ok((stream, peer_addr)) => {
                         let router = Arc::clone(&router);
                         let config = config.clone();
                         let mws = Arc::clone(&middlewares);
                         let inj = state_injector.clone();
+                        let conns = Arc::clone(&active_conns);
+                        conns.fetch_add(1, Ordering::AcqRel);
                         drop(spawn(async move {
                             let conn = Connection::new(stream, peer_addr, config);
                             conn.run(&router, &mws, &inj).await;
+                            conns.fetch_sub(1, Ordering::AcqRel);
                         }));
                     }
                     Err(e) => {
                         eprintln!("moduvex-http: accept error: {e}");
-                        break;
+                        continue;
                     }
                 }
             }

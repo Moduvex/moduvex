@@ -370,10 +370,14 @@ fn parse_error_to_status(e: &ParseError) -> StatusCode {
     }
 }
 
-/// Check if the buffer contains a complete chunked body by attempting to decode.
-/// This avoids scanning for `0\r\n\r\n` at arbitrary offsets (request smuggling).
+/// Check if the buffer contains the chunked terminator (`0\r\n\r\n`).
+///
+/// This is a cheap pre-check to decide whether a chunked message might be
+/// complete. Full validation/decoding still happens later in parser.
 fn has_chunked_terminator(buf: &[u8]) -> bool {
-    // Only consider it complete if the actual chunked decoder succeeds.
-    // Incomplete returns false; malformed also returns false (handled later).
-    crate::protocol::h1::decode_chunked(buf).is_ok()
+    if buf.len() < 5 {
+        return false;
+    }
+
+    buf.windows(5).any(|w| w == b"0\r\n\r\n")
 }

@@ -70,8 +70,14 @@ impl<'a> Future for TickFuture<'a> {
             let elapsed = now.duration_since(fired_at);
             let extra_ticks = (elapsed.as_nanos() / self.interval.period.as_nanos()) as u64;
             self.interval.missed += extra_ticks;
-            self.interval.next_deadline =
-                fired_at + self.interval.period * (extra_ticks as u32 + 1);
+            // Saturate to u32::MAX to avoid truncation when extra_ticks exceeds u32 range.
+            let advance = extra_ticks.saturating_add(1).min(u32::MAX as u64) as u32;
+            let skip = self
+                .interval
+                .period
+                .checked_mul(advance)
+                .unwrap_or(Duration::MAX);
+            self.interval.next_deadline = fired_at + skip;
 
             return Poll::Ready(fired_at);
         }

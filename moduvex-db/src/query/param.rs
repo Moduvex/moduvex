@@ -125,15 +125,29 @@ impl<T: ToParam> ToParam for Option<T> {
 
 /// Replace `$1`, `$2`, … placeholders in `sql` with inlined SQL literals.
 ///
+/// Skips substitution inside string literals to prevent SQL corruption.
+///
 /// # Errors
 /// Returns `Err` if a placeholder index is out of range (1-based).
 pub fn substitute_params(sql: &str, params: &[Param]) -> Result<String> {
     let mut result = String::with_capacity(sql.len() + params.len() * 4);
     let bytes = sql.as_bytes();
     let mut i = 0;
+    let mut in_string = false;
 
     while i < bytes.len() {
-        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
+        let ch = bytes[i];
+
+        // Track string literal boundaries
+        if ch == b'\'' {
+            in_string = !in_string;
+            result.push(ch as char);
+            i += 1;
+            continue;
+        }
+
+        // Only substitute $ placeholders outside string literals
+        if !in_string && ch == b'$' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
             // Collect the full number (may be multi-digit: $10, $42, …)
             let start = i + 1;
             let mut end = start;
@@ -151,7 +165,7 @@ pub fn substitute_params(sql: &str, params: &[Param]) -> Result<String> {
             result.push_str(&params[idx - 1].to_sql_literal());
             i = end;
         } else {
-            result.push(bytes[i] as char);
+            result.push(ch as char);
             i += 1;
         }
     }
@@ -239,5 +253,13 @@ mod tests {
     fn hex_encode_bytes() {
         let p = Param::Bytes(vec![0xDE, 0xAD, 0xBE, 0xEF]);
         assert!(p.to_sql_literal().contains("deadbeef"));
+    }
+
+    #[test]
+    fn substitute_params_skips_dollar_in_string_literals() {
+        let sql = "SELECT * FROM t WHERE col = '$1' AND id = $1";
+        let params = vec![Param::Int4(42)];
+        let result = substitute_params(sql, &params).unwrap();
+        assert_eq!(result, "SELECT * FROM t WHERE col = '$1' AND id = 42");
     }
 }

@@ -14,6 +14,7 @@ pub use config::PoolConfig;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::task::Waker;
 use std::time::Instant;
 
 use moduvex_runtime::sync::Mutex;
@@ -31,10 +32,14 @@ pub(crate) struct PoolInner {
     live: usize,
     /// True after `close()` is called; no new connections will be created.
     closed: bool,
+    /// Wakers for tasks waiting to acquire a connection.
+    waiters: Vec<Waker>,
 }
 
 struct IdleConn {
     conn: PgConnection,
+    /// When this connection was first created.
+    created_at: Instant,
     /// When this connection was returned to the pool.
     idle_since: Instant,
 }
@@ -56,6 +61,7 @@ impl ConnectionPool {
                 idle: VecDeque::new(),
                 live: 0,
                 closed: false,
+                waiters: Vec::new(),
             })),
             cfg,
         })
@@ -103,12 +109,14 @@ impl ConnectionPool {
                     }
                 }
                 None => {
-                    // Pool exhausted — yield and retry with timeout
+                    // Pool exhausted — register waker and wait for release() notification
                     if Instant::now() >= deadline {
                         return Err(DbError::PoolTimeout);
                     }
-                    // Small yield to let other tasks return connections
-                    moduvex_runtime::sleep(std::time::Duration::from_millis(5)).await;
+                    // Wait via poll_fn: registers waker in pool, then yields.
+                    // release() will wake us; timeout fallback via spawned sleep.
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    wait_for_release(Arc::clone(&self.inner), remaining).await;
                 }
             }
         }
@@ -117,6 +125,7 @@ impl ConnectionPool {
     /// Return a connection to the pool.
     ///
     /// If the pool is closed or at capacity, the connection is dropped (closed).
+    /// Wakes one waiting `acquire()` caller if any are queued.
     pub async fn release(&self, conn: PgConnection) {
         let mut g = self.inner.lock().await;
         if g.closed || g.idle.len() >= self.cfg.max_size {
@@ -128,17 +137,30 @@ impl ConnectionPool {
         }
         g.idle.push_back(IdleConn {
             conn,
+            created_at: Instant::now(),
             idle_since: Instant::now(),
         });
+        // Wake exactly one waiting acquire() caller
+        if let Some(waker) = g.waiters.pop() {
+            waker.wake();
+        }
     }
 
     /// Close the pool: mark it closed, drain idle connections.
+    ///
+    /// Does NOT zero `live` — checked-out connections are still alive and will
+    /// decrement `live` when returned via `release()`.
     pub async fn close(&self) {
         let mut g = self.inner.lock().await;
         g.closed = true;
-        // Drain idle connections (they'll be dropped → sockets closed)
+        let idle_count = g.idle.len();
         let drained: Vec<_> = g.idle.drain(..).collect();
-        g.live = 0;
+        // Only subtract the idle connections we actually drained
+        g.live = g.live.saturating_sub(idle_count);
+        // Wake any tasks blocked in acquire() so they get PoolClosed
+        for waker in g.waiters.drain(..) {
+            waker.wake();
+        }
         drop(g);
         drop(drained); // close sockets outside lock
     }
@@ -170,9 +192,49 @@ impl ConnectionPool {
     }
 }
 
+// ── Wait-for-release helper ──────────────────────────────────────────────────
+
+/// Register the current task's waker in the pool's waiter list, then sleep
+/// until either `release()` wakes us or the timeout expires.
+///
+/// This replaces the naive 5ms spin-wait with a targeted notification:
+/// `release()` calls `waker.wake()` on exactly one waiter, eliminating
+/// thundering-herd and reducing latency from up to 5ms to near-zero.
+async fn wait_for_release(inner: Arc<Mutex<PoolInner>>, timeout: std::time::Duration) {
+    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // Register waker via poll_fn, then sleep as timeout fallback.
+    // The key improvement over 5ms spin: release() wakes us immediately
+    // via the waker, and we only sleep up to `timeout` (not 5ms intervals).
+    std::future::poll_fn(|cx| {
+        if flag.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            // Second poll — we were woken (by release or timeout)
+            return std::task::Poll::Ready(());
+        }
+        // First poll — register waker and yield
+        let waker = cx.waker().clone();
+        let inner2 = inner.clone();
+        let flag2 = flag.clone();
+        moduvex_runtime::spawn(async move {
+            {
+                let mut g = inner2.lock().await;
+                g.waiters.push(waker.clone());
+            }
+            // Timeout fallback
+            moduvex_runtime::sleep(timeout).await;
+            flag2.store(true, std::sync::atomic::Ordering::Relaxed);
+            waker.wake();
+        });
+        std::task::Poll::Pending
+    })
+    .await;
+}
+
 // ── URL parser ────────────────────────────────────────────────────────────────
 
 /// Parse `postgres://user:password@host:port/database` into components.
+///
+/// Percent-decodes userinfo components to support special characters in passwords.
 ///
 /// Returns `(user, password, "host:port", database)`.
 pub(crate) fn parse_url(url: &str) -> Result<(String, String, String, String)> {
@@ -189,14 +251,35 @@ pub(crate) fn parse_url(url: &str) -> Result<(String, String, String, String)> {
 
     let (user, password) = userinfo
         .split_once(':')
-        .map(|(u, p)| (u.to_string(), p.to_string()))
-        .unwrap_or_else(|| (userinfo.to_string(), String::new()));
+        .map(|(u, p)| (percent_decode(u), percent_decode(p)))
+        .unwrap_or_else(|| (percent_decode(userinfo), String::new()));
 
     let (hostport, database) = hostpath
         .split_once('/')
         .ok_or_else(|| DbError::Other(format!("missing database name in URL: {url}")))?;
 
     Ok((user, password, hostport.to_string(), database.to_string()))
+}
+
+/// Decode percent-encoded string (e.g., "%40" → "@").
+fn percent_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                result.push(byte as char);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+
+    result
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -241,5 +324,13 @@ mod tests {
     fn pool_config_validate() {
         let cfg = PoolConfig::new("postgres://u:p@localhost:5432/db");
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn parse_url_percent_encoded_password() {
+        let (user, pass, _, _) =
+            parse_url("postgres://alice:p%40ssw%3Ard@127.0.0.1:5432/mydb").unwrap();
+        assert_eq!(user, "alice");
+        assert_eq!(pass, "p@ssw:rd");
     }
 }

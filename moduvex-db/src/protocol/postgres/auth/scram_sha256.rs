@@ -285,7 +285,7 @@ pub fn encode_sasl_response(client_final: &str) -> Vec<u8> {
 /// Extract a named attribute from a comma-separated SCRAM message.
 ///
 /// SCRAM attributes are `key=value` pairs. Returns the value slice or `None`.
-fn extract_attr<'a>(msg: &'a str, key: char) -> Option<&'a str> {
+fn extract_attr(msg: &str, key: char) -> Option<&str> {
     let prefix = format!("{key}=");
     for part in msg.split(',') {
         if let Some(val) = part.strip_prefix(prefix.as_str()) {

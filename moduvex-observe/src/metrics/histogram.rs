@@ -105,9 +105,7 @@ impl Histogram {
     }
 }
 
-// Safety: all fields use atomics.
-unsafe impl Send for Histogram {}
-unsafe impl Sync for Histogram {}
+// All fields are Send + Sync (atomics, &'static str/[f64], Vec<AtomicU64>), auto-derives both.
 
 impl std::fmt::Debug for Histogram {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

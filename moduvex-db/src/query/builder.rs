@@ -10,7 +10,7 @@
 //!     .build();
 //! ```
 
-use crate::error::Result;
+use crate::error::{DbError, Result};
 use crate::query::param::{substitute_params, Param, ToParam};
 
 // ── Order ─────────────────────────────────────────────────────────────────────
@@ -65,47 +65,47 @@ pub struct QueryBuilder {
 impl QueryBuilder {
     /// Start a SELECT query against `table`.
     ///
-    /// # Panics
-    /// Panics if `table` contains invalid identifier characters.
-    pub fn select(table: impl Into<String>) -> Self {
+    /// # Errors
+    /// Returns `DbError::Other` if `table` contains invalid identifier characters.
+    pub fn select(table: impl Into<String>) -> Result<Self> {
         let table = table.into();
-        validate_identifier(&table).expect("invalid table name");
-        Self {
+        validate_identifier(&table).map_err(DbError::Other)?;
+        Ok(Self {
             table,
             ..Default::default()
-        }
+        })
     }
 
     /// Set the columns to SELECT. Defaults to `*` if not called.
     ///
-    /// # Panics
-    /// Panics if any column name contains invalid identifier characters.
-    pub fn columns(mut self, cols: &[&str]) -> Self {
+    /// # Errors
+    /// Returns `DbError::Other` if any column name contains invalid identifier characters.
+    pub fn columns(mut self, cols: &[&str]) -> Result<Self> {
         for col in cols {
-            validate_identifier(col).expect("invalid column name");
+            validate_identifier(col).map_err(DbError::Other)?;
         }
         self.columns = cols.iter().map(|s| s.to_string()).collect();
-        self
+        Ok(self)
     }
 
     /// Add an `AND col = $n` equality condition.
     ///
-    /// # Panics
-    /// Panics if `col` contains invalid identifier characters.
-    pub fn where_eq(mut self, col: &str, val: impl ToParam) -> Self {
-        validate_identifier(col).expect("invalid column name in where_eq");
+    /// # Errors
+    /// Returns `DbError::Other` if `col` contains invalid identifier characters.
+    pub fn where_eq(mut self, col: &str, val: impl ToParam) -> Result<Self> {
+        validate_identifier(col).map_err(DbError::Other)?;
         self.conditions.push((col.to_string(), val.to_param()));
-        self
+        Ok(self)
     }
 
     /// Add an ORDER BY clause.
     ///
-    /// # Panics
-    /// Panics if `col` contains invalid identifier characters.
-    pub fn order_by(mut self, col: &str, order: Order) -> Self {
-        validate_identifier(col).expect("invalid column name in order_by");
+    /// # Errors
+    /// Returns `DbError::Other` if `col` contains invalid identifier characters.
+    pub fn order_by(mut self, col: &str, order: Order) -> Result<Self> {
+        validate_identifier(col).map_err(DbError::Other)?;
         self.order = Some((col.to_string(), order));
-        self
+        Ok(self)
     }
 
     /// Add a LIMIT clause.
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn select_all_no_conditions() {
-        let (sql, params) = QueryBuilder::select("users").build();
+        let (sql, params) = QueryBuilder::select("users").unwrap().build();
         assert_eq!(sql, "SELECT * FROM users");
         assert!(params.is_empty());
     }
@@ -185,7 +185,9 @@ mod tests {
     #[test]
     fn select_specific_columns() {
         let (sql, _) = QueryBuilder::select("users")
+            .unwrap()
             .columns(&["id", "name"])
+            .unwrap()
             .build();
         assert_eq!(sql, "SELECT id, name FROM users");
     }
@@ -193,8 +195,11 @@ mod tests {
     #[test]
     fn select_with_where_eq() {
         let (sql, params) = QueryBuilder::select("users")
+            .unwrap()
             .columns(&["id"])
+            .unwrap()
             .where_eq("active", true)
+            .unwrap()
             .build();
         assert!(sql.contains("WHERE active = $1"));
         assert_eq!(params, vec![Param::Bool(true)]);
@@ -203,8 +208,11 @@ mod tests {
     #[test]
     fn select_multiple_conditions() {
         let (sql, params) = QueryBuilder::select("users")
+            .unwrap()
             .where_eq("id", 42i32)
+            .unwrap()
             .where_eq("name", "Alice")
+            .unwrap()
             .build();
         assert!(sql.contains("id = $1"));
         assert!(sql.contains("name = $2"));
@@ -216,7 +224,9 @@ mod tests {
     #[test]
     fn select_with_order_limit_offset() {
         let (sql, _) = QueryBuilder::select("posts")
+            .unwrap()
             .order_by("created_at", Order::Desc)
+            .unwrap()
             .limit(10)
             .offset(20)
             .build();
@@ -228,8 +238,11 @@ mod tests {
     #[test]
     fn build_inlined_substitutes_params() {
         let sql = QueryBuilder::select("users")
+            .unwrap()
             .where_eq("id", 7i32)
+            .unwrap()
             .where_eq("name", "Bob")
+            .unwrap()
             .build_inlined()
             .unwrap();
         assert!(sql.contains("id = 7"));

@@ -36,6 +36,7 @@ impl HealthMonitorConfig {
 /// This is called by the background loop (see `spawn_health_monitor`).
 pub async fn run_health_sweep(pool: &Arc<ConnectionPool>) {
     let idle_timeout = pool.config().idle_timeout;
+    let max_lifetime = pool.config().max_lifetime;
     let min_idle = pool.config().min_idle;
     let now = Instant::now();
 
@@ -48,8 +49,10 @@ pub async fn run_health_sweep(pool: &Arc<ConnectionPool>) {
 
     let mut survivors = Vec::new();
     for mut entry in to_check {
-        // Evict if idle too long
-        if now.duration_since(entry.idle_since) > idle_timeout {
+        // Evict if idle too long or past max lifetime
+        if now.duration_since(entry.idle_since) > idle_timeout
+            || now.duration_since(entry.created_at) > max_lifetime
+        {
             // Decrement live count; connection is dropped here
             let mut g = pool.inner().lock().await;
             g.live = g.live.saturating_sub(1);
@@ -103,8 +106,8 @@ pub fn spawn_health_monitor(pool: Arc<ConnectionPool>) {
     moduvex_runtime::spawn(async move {
         loop {
             moduvex_runtime::sleep(interval).await;
-            // Stop if pool has been closed
-            if pool.live_count().await == 0 && pool.idle_count().await == 0 {
+            // Stop when pool is explicitly closed — not based on counts
+            if pool.inner().lock().await.closed {
                 break;
             }
             run_health_sweep(&pool).await;

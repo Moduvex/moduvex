@@ -31,8 +31,12 @@ pub trait FromRequest: Sized + Send + 'static {
     fn from_request(req: &mut Request) -> Result<Self, Self::Rejection>;
 }
 
-// Request itself is trivially extractable — backward compatible with
+// Request itself is extractable for backward compatibility with
 // `async fn handler(req: Request) -> Response` signatures.
+//
+// IMPORTANT: this extractor consumes the whole request by replacing `req`.
+// Place `Request` as the LAST extractor in handler signatures; otherwise
+// later extractors will see a dummy request (`GET /`) and may misbehave.
 impl FromRequest for Request {
     type Rejection = std::convert::Infallible;
 

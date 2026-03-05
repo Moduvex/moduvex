@@ -13,6 +13,7 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+pub mod sockaddr;
 pub mod tcp_listener;
 pub mod tcp_stream;
 pub mod udp_socket;

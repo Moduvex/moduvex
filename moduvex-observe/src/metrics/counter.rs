@@ -43,9 +43,7 @@ impl Counter {
     }
 }
 
-// Safety: AtomicU64 is inherently thread-safe.
-unsafe impl Send for Counter {}
-unsafe impl Sync for Counter {}
+// All fields are Send + Sync (AtomicU64, &'static str), so Counter auto-derives both.
 
 impl std::fmt::Debug for Counter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
