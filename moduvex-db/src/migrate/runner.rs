@@ -118,16 +118,18 @@ pub const SELECT_APPLIED_SQL: &str = "SELECT version FROM _moduvex_migrations OR
 
 /// Build the SQL to record a migration as applied.
 ///
-/// The filename is sanitized: null bytes stripped, single quotes escaped.
-/// The version is a u64 (safe from injection).
+/// Uses PostgreSQL dollar-quoting (`$mig$…$mig$`) for the filename to avoid
+/// single-quote and backslash injection entirely. The tag `$mig$` is chosen to
+/// minimise collision risk with legitimate filenames; null bytes are stripped
+/// as they cannot appear in valid SQL identifiers anyway.
+///
+/// The version is a `u64` literal — no injection risk.
 pub fn insert_applied_sql(version: u64, filename: &str) -> String {
-    // Strip null bytes and escape single quotes for SQL string literals.
-    let safe_name = filename
-        .replace('\0', "")
-        .replace('\\', "\\\\")
-        .replace('\'', "''");
+    // Strip null bytes (cannot appear in SQL strings) and the tag itself
+    // (extremely unlikely in a filename, but guard defensively).
+    let safe_name = filename.replace('\0', "").replace("$mig$", "");
     format!(
-        "INSERT INTO _moduvex_migrations (version, filename) VALUES ({version}, E'{safe_name}')"
+        "INSERT INTO _moduvex_migrations (version, filename) VALUES ({version}, $mig${safe_name}$mig$)"
     )
 }
 
@@ -209,9 +211,18 @@ mod tests {
     }
 
     #[test]
-    fn insert_applied_sql_escapes_filename() {
+    fn insert_applied_sql_uses_dollar_quoting() {
+        // Dollar-quoting means single quotes are NOT escaped.
         let sql = insert_applied_sql(1, "001_it's_a_test.sql");
-        assert!(sql.contains("it''s_a_test"));
+        assert!(sql.contains("$mig$"), "should use dollar-quoting");
+        assert!(sql.contains("it's_a_test"), "single quote must pass through unescaped");
+        assert!(!sql.contains("''"), "no double-quote escaping should occur");
+    }
+
+    #[test]
+    fn insert_applied_sql_strips_null_bytes() {
+        let sql = insert_applied_sql(2, "002_test\0.sql");
+        assert!(!sql.contains('\0'), "null bytes must be stripped");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

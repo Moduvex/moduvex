@@ -21,12 +21,19 @@ pub enum PathSegment {
 /// # Examples
 /// - `"/users/:id/posts"` → `[Static("users"), Param("id"), Static("posts")]`
 /// - `"/files/*path"`     → `[Static("files"), Wildcard("path")]`
+///
+/// # Wildcard placement
+/// A `*name` wildcard captures all remaining path segments and **must** be the
+/// last segment in the pattern. If trailing segments follow a wildcard they are
+/// silently ignored (the wildcard always terminates matching). A warning is
+/// printed to stderr when this condition is detected so route authors can fix
+/// their patterns.
 pub fn parse_pattern(pattern: &str) -> Vec<PathSegment> {
     let stripped = pattern.trim_start_matches('/');
     if stripped.is_empty() {
         return Vec::new();
     }
-    stripped
+    let segments: Vec<PathSegment> = stripped
         .split('/')
         .map(|seg| {
             if let Some(name) = seg.strip_prefix(':') {
@@ -37,7 +44,23 @@ pub fn parse_pattern(pattern: &str) -> Vec<PathSegment> {
                 PathSegment::Static(seg.to_string())
             }
         })
-        .collect()
+        .collect();
+
+    // Warn if a wildcard appears before the last segment — trailing segments
+    // will never be matched and the pattern is likely a mistake.
+    if let Some(wildcard_pos) = segments
+        .iter()
+        .position(|s| matches!(s, PathSegment::Wildcard(_)))
+    {
+        if wildcard_pos + 1 < segments.len() {
+            eprintln!(
+                "[moduvex-http] warning: wildcard segment is not last in pattern '{pattern}'; \
+                 segments after the wildcard are unreachable and will be ignored"
+            );
+        }
+    }
+
+    segments
 }
 
 /// Match a URL path against route segments, returning captured params.
@@ -158,5 +181,14 @@ mod tests {
     fn no_match_extra_segments() {
         let segs = parse_pattern("/users");
         assert!(match_path(&segs, "/users/extra").is_none());
+    }
+
+    #[test]
+    fn wildcard_not_last_is_still_parseable() {
+        // parse_pattern warns but returns a usable segment list.
+        // The wildcard captures all remaining; trailing segments are unreachable.
+        let segs = parse_pattern("/files/*path/extra");
+        // Wildcard is at position 1; "extra" is at position 2 (unreachable).
+        assert!(segs.iter().any(|s| matches!(s, PathSegment::Wildcard(_))));
     }
 }

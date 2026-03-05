@@ -135,65 +135,91 @@ impl TimerWheel {
 
     /// Advance the wheel to `now`, returning all wakers whose timers have
     /// expired. Callers must call `wake()` on each returned `Waker`.
+    ///
+    /// # Performance
+    /// For large time jumps (e.g. 10 seconds), this method drains the range of
+    /// level-0 slots in one pass rather than iterating ms-by-ms. Higher levels
+    /// are cascaded only at their slot boundaries within the range. This keeps
+    /// the cost proportional to the number of distinct slots crossed (O(slots))
+    /// rather than elapsed milliseconds (O(ms)).
     pub(crate) fn tick(&mut self, now: Instant) -> Vec<Waker> {
         let now_ms = self.instant_to_ms(now);
         let mut fired: Vec<Waker> = Vec::new();
 
-        // Process every millisecond tick from last processed up to now.
-        // For large jumps (e.g. after a long sleep) we cascade all levels.
         let from = self.last_tick_ms;
         let to = now_ms;
 
         if to < from {
-            return fired; // clock did not advance (equal means process current slot)
+            return fired;
         }
 
-        // Range is inclusive of `from` so that timers inserted exactly at
-        // `last_tick_ms` (deadline ≤ last_tick_ms) get drained on the first
-        // tick call after they are inserted.
-        let mut t = from;
-        loop {
-            // Drain level-0 slot for this tick.
-            let slot0 = (t & SLOTS_MASK) as usize;
-            let entries = std::mem::take(&mut self.wheel[0][slot0]);
-            for entry in entries {
-                self.index.remove(&entry.id);
-                // Fire if deadline has passed; otherwise re-insert (shouldn't
-                // happen in correct usage, but guard against edge cases).
-                if self.instant_to_ms(entry.deadline) <= t {
-                    fired.push(entry.waker);
-                } else {
-                    // Re-insert if somehow placed in wrong slot.
-                    self.insert_raw(entry);
-                }
-            }
+        // ── Optimised path: drain all expired slots without ms-by-ms iteration ──
+        //
+        // Level 0 wraps every 64 slots (64 ms per revolution). If the jump
+        // spans more than 64 ms we drain *all* level-0 slots (full revolution).
+        // Otherwise we drain just the range [from_slot0..=to_slot0].
+        let from_slot0 = (from & SLOTS_MASK) as usize;
+        let to_slot0 = (to & SLOTS_MASK) as usize;
+        let span = to.saturating_sub(from);
 
-            // Cascade higher levels when their slot boundary is crossed.
-            // Level N cascades when tick crosses a multiple of SLOTS^N.
-            for level in 1..LEVELS {
-                let width = slot_width_ms(level);
-                if t % width == 0 {
-                    let slot = ((t / width) & SLOTS_MASK) as usize;
-                    let entries = std::mem::take(&mut self.wheel[level][slot]);
-                    for entry in entries {
-                        self.index.remove(&entry.id);
-                        if self.instant_to_ms(entry.deadline) <= t {
-                            fired.push(entry.waker);
-                        } else {
-                            self.insert_raw(entry);
-                        }
-                    }
-                }
+        if span >= SLOTS as u64 {
+            // Full revolution or more — drain every level-0 slot.
+            for slot in 0..SLOTS {
+                self.drain_slot(0, slot, to, &mut fired);
             }
+        } else if from_slot0 <= to_slot0 {
+            // No wrap-around within this revolution.
+            for slot in from_slot0..=to_slot0 {
+                self.drain_slot(0, slot, to, &mut fired);
+            }
+        } else {
+            // Wrap-around: drain [from_slot0..SLOTS) then [0..=to_slot0].
+            for slot in from_slot0..SLOTS {
+                self.drain_slot(0, slot, to, &mut fired);
+            }
+            for slot in 0..=to_slot0 {
+                self.drain_slot(0, slot, to, &mut fired);
+            }
+        }
 
-            if t >= to {
-                break;
+        // ── Cascade higher levels at their slot boundaries within [from, to] ──
+        for level in 1..LEVELS {
+            let width = slot_width_ms(level);
+            // First boundary at or after `from`.
+            let first_boundary = if from % width == 0 {
+                from
+            } else {
+                (from / width + 1) * width
+            };
+            let mut boundary = first_boundary;
+            while boundary <= to {
+                let slot = ((boundary / width) & SLOTS_MASK) as usize;
+                self.drain_slot(level, slot, to, &mut fired);
+                boundary = match boundary.checked_add(width) {
+                    Some(b) => b,
+                    None => break,
+                };
             }
-            t += 1;
         }
 
         self.last_tick_ms = to;
         fired
+    }
+
+    /// Drain all entries from `wheel[level][slot]`.
+    ///
+    /// Entries whose deadline has passed (≤ `now_ms`) are fired immediately.
+    /// Entries still in the future are re-inserted at the correct wheel position.
+    fn drain_slot(&mut self, level: usize, slot: usize, now_ms: u64, fired: &mut Vec<Waker>) {
+        let entries = std::mem::take(&mut self.wheel[level][slot]);
+        for entry in entries {
+            self.index.remove(&entry.id);
+            if self.instant_to_ms(entry.deadline) <= now_ms {
+                fired.push(entry.waker);
+            } else {
+                self.insert_raw(entry);
+            }
+        }
     }
 
     /// Return the nearest deadline across all wheel slots, if any timers are pending.
@@ -397,5 +423,36 @@ mod tests {
 
         let earliest = wheel.next_deadline().expect("should have a deadline");
         assert_eq!(earliest, d2, "next_deadline must return earliest");
+    }
+
+    #[test]
+    fn large_time_jump_fires_timer_quickly() {
+        // Regression test: a 10-second jump should not cause O(10_000) ms iterations.
+        // We verify correctness; the performance gain is implicit (test must complete fast).
+        let flag = Arc::new(Mutex::new(false));
+        let waker = make_flag_waker(Arc::clone(&flag));
+
+        let origin = Instant::now();
+        let mut wheel = TimerWheel::new(origin);
+
+        let deadline = origin + Duration::from_millis(50);
+        wheel.insert(deadline, waker);
+
+        // Jump 10 seconds ahead in a single tick call.
+        let start = std::time::Instant::now();
+        let wakers = wheel.tick(origin + Duration::from_secs(10));
+        let elapsed = start.elapsed();
+
+        assert_eq!(wakers.len(), 1, "timer must fire on 10s jump");
+        for w in wakers {
+            w.wake();
+        }
+        assert!(*flag.lock().unwrap(), "waker must have been called");
+        // 10s ms-by-ms would take >10ms; optimised slot-drain takes <1ms.
+        assert!(
+            elapsed < Duration::from_millis(10),
+            "10s tick must complete in <10ms, took {:?}",
+            elapsed
+        );
     }
 }

@@ -27,17 +27,14 @@ use crate::executor;
 ///
 /// Currently single-threaded (thread-per-core). Multi-thread work-stealing
 /// will be added in a future phase.
-pub struct RuntimeBuilder {
-    _io: bool,
-    _time: bool,
-}
+///
+/// The runtime always enables both I/O and timer support — separate feature
+/// flags are not meaningful for the current single-threaded implementation.
+pub struct RuntimeBuilder;
 
 impl RuntimeBuilder {
     fn new() -> Self {
-        Self {
-            _io: false,
-            _time: false,
-        }
+        Self
     }
 
     /// Use thread-per-core threading model (default).
@@ -45,15 +42,13 @@ impl RuntimeBuilder {
         self // already the default
     }
 
-    /// Enable the I/O reactor.
-    pub fn enable_io(mut self) -> Self {
-        self._io = true;
+    /// Enable the I/O reactor (no-op: always enabled).
+    pub fn enable_io(self) -> Self {
         self
     }
 
-    /// Enable the timer wheel.
-    pub fn enable_time(mut self) -> Self {
-        self._time = true;
+    /// Enable the timer wheel (no-op: always enabled).
+    pub fn enable_time(self) -> Self {
         self
     }
 

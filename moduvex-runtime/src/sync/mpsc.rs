@@ -19,6 +19,8 @@ struct Inner<T> {
     capacity: Option<usize>,
     /// Number of live `Sender` handles (including `UnboundedSender`).
     sender_count: usize,
+    /// Set to `true` when the `Receiver` is dropped.
+    receiver_dropped: bool,
     /// Waker for the blocked receiver (empty queue).
     recv_waker: Option<Waker>,
     /// Wakers for blocked senders (full bounded queue).
@@ -31,6 +33,7 @@ impl<T> Inner<T> {
             queue: VecDeque::new(),
             capacity,
             sender_count: 1,
+            receiver_dropped: false,
             recv_waker: None,
             send_wakers: VecDeque::new(),
         }
@@ -45,8 +48,13 @@ impl<T> Inner<T> {
     }
 
     /// True when all senders have been dropped.
-    fn is_closed(&self) -> bool {
+    fn senders_closed(&self) -> bool {
         self.sender_count == 0
+    }
+
+    /// True when the channel is closed from either direction.
+    fn is_closed(&self) -> bool {
+        self.sender_count == 0 || self.receiver_dropped
     }
 }
 
@@ -96,6 +104,19 @@ impl<T> Drop for Sender<T> {
     }
 }
 
+impl<T> Drop for Receiver<T> {
+    fn drop(&mut self) {
+        let mut g = self.inner.lock().unwrap();
+        g.receiver_dropped = true;
+        // Wake all blocked senders so they can observe the closed channel.
+        let wakers: Vec<Waker> = g.send_wakers.drain(..).collect();
+        drop(g);
+        for w in wakers {
+            w.wake();
+        }
+    }
+}
+
 impl<T> Sender<T> {
     /// Send `value` through the channel, waiting if the buffer is full.
     ///
@@ -104,6 +125,7 @@ impl<T> Sender<T> {
         SendFuture {
             inner: &self.inner,
             value: Some(value),
+            registered_waker: None,
         }
     }
 }
@@ -113,34 +135,62 @@ pub struct SendFuture<'a, T> {
     inner: &'a Arc<Mutex<Inner<T>>>,
     /// `None` after the value has been deposited.
     value: Option<T>,
+    /// Waker we registered in `send_wakers`, stored for Drop cleanup.
+    registered_waker: Option<Waker>,
 }
 
 impl<T> Future for SendFuture<'_, T> {
     type Output = Result<(), T>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // SAFETY: `SendFuture` contains only a shared reference and an
-        // `Option<T>`. It does not use structural pinning on `T`, so it is
-        // safe to obtain `&mut Self` from `Pin<&mut Self>`.
+        // SAFETY: `SendFuture` contains only a shared reference, `Option<T>`,
+        // and `Option<Waker>`. No structural pinning on T; safe to get &mut Self.
         let this = unsafe { self.get_unchecked_mut() };
         let mut g = this.inner.lock().unwrap();
         if g.is_closed() {
-            // Receiver gone — return the value as an error.
+            this.registered_waker = None;
             return Poll::Ready(Err(this.value.take().unwrap()));
         }
         if g.has_capacity() {
+            this.registered_waker = None;
             let val = this.value.take().unwrap();
             g.queue.push_back(val);
-            // Wake the receiver if it was waiting.
             if let Some(w) = g.recv_waker.take() {
                 drop(g);
                 w.wake();
             }
             Poll::Ready(Ok(()))
         } else {
-            // Queue full — register waker and yield.
-            g.send_wakers.push_back(cx.waker().clone());
+            let new_waker = cx.waker().clone();
+            if let Some(ref existing) = this.registered_waker {
+                if !existing.will_wake(&new_waker) {
+                    // Replace our stale waker in send_wakers.
+                    for w in &mut g.send_wakers {
+                        if w.will_wake(existing) {
+                            *w = new_waker.clone();
+                            break;
+                        }
+                    }
+                    this.registered_waker = Some(new_waker);
+                }
+            } else {
+                g.send_wakers.push_back(new_waker.clone());
+                this.registered_waker = Some(new_waker);
+            }
             Poll::Pending
+        }
+    }
+}
+
+impl<T> Drop for SendFuture<'_, T> {
+    fn drop(&mut self) {
+        if let Some(ref waker) = self.registered_waker {
+            // Remove our waker from send_wakers to prevent orphaned wake-ups.
+            if let Ok(mut g) = self.inner.lock() {
+                if let Some(pos) = g.send_wakers.iter().position(|w| w.will_wake(waker)) {
+                    g.send_wakers.remove(pos);
+                }
+            }
         }
     }
 }
@@ -186,6 +236,7 @@ impl<T> Drop for UnboundedSender<T> {
         }
     }
 }
+
 
 impl<T> UnboundedSender<T> {
     /// Send `value` immediately (never suspends).
@@ -239,7 +290,7 @@ impl<T> Future for RecvFuture<'_, T> {
                 w.wake();
             }
             Poll::Ready(Some(val))
-        } else if g.is_closed() {
+        } else if g.senders_closed() {
             Poll::Ready(None)
         } else {
             g.recv_waker = Some(cx.waker().clone());
@@ -326,11 +377,36 @@ mod tests {
         block_on(async {
             let (tx, rx) = channel::<u32>(4);
             drop(rx);
-            // Mark inner as closed by faking sender count: just drop rx and try send.
-            // The receiver drop doesn't close from rx side in our design —
-            // only sender drops close. But we can verify send still works
-            // with a live receiver via normal path.
-            let _ = tx; // tx still alive, just verify compile
+            // Receiver dropped — sender must get Err immediately.
+            let result = tx.send(99).await;
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err(), 99);
+        });
+    }
+
+    #[test]
+    fn unbounded_send_to_closed_receiver_returns_err() {
+        let (tx, rx) = unbounded::<u32>();
+        drop(rx);
+        assert_eq!(tx.send(42), Err(42));
+    }
+
+    #[test]
+    fn bounded_blocked_sender_woken_on_receiver_drop() {
+        block_on_with_spawn(async {
+            // Channel capacity = 1, fill it, spawn a sender that will block
+            let (tx, rx) = channel::<u32>(1);
+            tx.send(1).await.unwrap();
+            let tx2 = tx.clone();
+            let jh = spawn(async move {
+                // This send blocks because buffer is full; receiver drop should wake it.
+                tx2.send(2).await
+            });
+            // Drop receiver — should unblock the sender with Err
+            drop(tx);
+            drop(rx);
+            let result = jh.await.unwrap();
+            assert!(result.is_err());
         });
     }
 }

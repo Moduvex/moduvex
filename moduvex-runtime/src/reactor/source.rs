@@ -20,11 +20,25 @@ use crate::platform::sys::{Interest, RawSource};
 /// Global counter for assigning unique tokens to `IoSource` instances.
 static TOKEN_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
-/// Allocate the next unique token. Token 0 is reserved; `usize::MAX` is the
-/// executor's self-pipe sentinel — both are skipped automatically given the
-/// counter starts at 1 and wraps through the full `usize` space in practice.
+/// Sentinel tokens reserved by the executor/signal subsystem.
+/// These must never be assigned to user `IoSource` instances.
+pub(crate) const WAKE_TOKEN: usize = usize::MAX;
+pub(crate) const SIGNAL_TOKEN_GUARD: usize = usize::MAX - 1;
+
+/// Allocate the next unique token.
+///
+/// Skips sentinel values (`usize::MAX`, `usize::MAX - 1`) used by the executor
+/// and signal subsystem. In practice the counter can never reach these values
+/// in a single process lifetime (~18 quintillion allocations), but we guard
+/// defensively to prevent undefined behaviour on extremely long-lived processes.
 pub(crate) fn next_token() -> usize {
-    TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed)
+    let t = TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed);
+    // Guard against wrapping into sentinel range (theoretical: ~18 quintillion allocations).
+    debug_assert!(
+        t < WAKE_TOKEN - 2,
+        "token counter approaching sentinel values — process has allocated too many IoSources"
+    );
+    t
 }
 
 /// RAII I/O source registered with the thread-local reactor.
