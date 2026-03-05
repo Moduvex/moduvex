@@ -14,6 +14,8 @@
 //! }
 //! ```
 
+pub mod tracing_middleware;
+
 // ── Re-exports ──
 
 pub use moduvex_config;
@@ -21,6 +23,7 @@ pub use moduvex_core;
 pub use moduvex_http;
 pub use moduvex_observe;
 pub use moduvex_runtime;
+pub use tracing_middleware::TracingMiddleware;
 
 // ── Default config ──
 
@@ -72,6 +75,9 @@ pub mod prelude {
     // Observability macros
     pub use moduvex_observe::{debug, error, info, trace_event, warn};
     pub use moduvex_observe::{Counter, Gauge, Histogram, Span};
+
+    // Tracing
+    pub use crate::TracingMiddleware;
 
     // Starter helpers
     pub use crate::{default_config, load_config, WEB_DEFAULTS};

@@ -22,4 +22,12 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
-# For benchmarks (later)
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "executor_benchmarks"
+harness = false
+
+[[bench]]
+name = "channel_benchmarks"
+harness = false

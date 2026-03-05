@@ -28,3 +28,16 @@ version = "2"
 optional = true
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "router_benchmarks"
+harness = false
+
+[[bench]]
+name = "parser_benchmarks"
+harness = false
+
+[[bench]]
+name = "ws_codec_benchmarks"
+harness = false
