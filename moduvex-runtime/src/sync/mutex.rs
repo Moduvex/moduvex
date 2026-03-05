@@ -67,33 +67,74 @@ impl<T> Mutex<T> {
     /// The returned future suspends if the lock is already held and resumes
     /// once the previous holder's `MutexGuard` is dropped.
     pub fn lock(&self) -> LockFuture<'_, T> {
-        LockFuture { inner: &self.inner }
+        LockFuture {
+            inner: &self.inner,
+            registered_waker: None,
+        }
     }
 }
 
 // ── LockFuture ────────────────────────────────────────────────────────────────
 
 /// Future returned by [`Mutex::lock`].
+///
+/// Stores its registered waker so it can remove itself from the queue on
+/// cancellation (drop before completion). This prevents MutexGuard::drop from
+/// waking an already-dropped task.
 pub struct LockFuture<'a, T> {
     inner: &'a Arc<StdMutex<Inner<T>>>,
+    /// The waker we pushed into `waiters`, stored so Drop can remove it.
+    /// `None` if we have not yet registered (or have already been resolved).
+    registered_waker: Option<Waker>,
 }
 
 impl<T> Future for LockFuture<'_, T> {
     type Output = MutexGuard<T>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut g = self.inner.lock().unwrap();
         if !g.locked {
             g.locked = true;
-            // Cache the pointer to the protected value at lock acquisition time.
+            self.registered_waker = None; // lock acquired; no longer in waiter queue
             let value_ptr = g.value.get();
             Poll::Ready(MutexGuard {
                 inner: Arc::clone(self.inner),
                 value_ptr,
             })
         } else {
-            g.waiters.push_back(cx.waker().clone());
+            let new_waker = cx.waker().clone();
+            if let Some(ref existing) = self.registered_waker {
+                // Already registered: update in place if waker changed.
+                if !existing.will_wake(&new_waker) {
+                    // Replace our stale waker in the queue with the new one.
+                    for w in &mut g.waiters {
+                        if w.will_wake(existing) {
+                            *w = new_waker.clone();
+                            break;
+                        }
+                    }
+                    self.registered_waker = Some(new_waker);
+                }
+            } else {
+                // First time blocked — push waker and remember it for cleanup.
+                g.waiters.push_back(new_waker.clone());
+                self.registered_waker = Some(new_waker);
+            }
             Poll::Pending
+        }
+    }
+}
+
+impl<T> Drop for LockFuture<'_, T> {
+    fn drop(&mut self) {
+        if let Some(ref waker) = self.registered_waker {
+            // Remove our waker so MutexGuard::drop doesn't wake a dead task.
+            if let Ok(mut g) = self.inner.lock() {
+                // Remove the first waker in the queue that matches ours.
+                if let Some(pos) = g.waiters.iter().position(|w| w.will_wake(waker)) {
+                    g.waiters.remove(pos);
+                }
+            }
         }
     }
 }

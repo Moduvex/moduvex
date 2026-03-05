@@ -60,6 +60,18 @@ impl PrometheusExporter {
         Self::render(metrics, &mut buf)?;
         Ok(buf)
     }
+
+    /// Render all metrics to a `String` for HTTP `/metrics` handlers.
+    ///
+    /// This is the primary method for integrating with HTTP servers — call it
+    /// in your `/metrics` route handler to return the Prometheus text format.
+    pub fn render_to_string(
+        metrics: &[(&str, &str, MetricKind, MetricSnapshot)],
+    ) -> std::io::Result<String> {
+        let buf = Self::render_to_vec(metrics)?;
+        // Prometheus format is guaranteed ASCII-subset UTF-8.
+        String::from_utf8(buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
 }
 
 impl super::Exporter for PrometheusExporter {
@@ -94,6 +106,19 @@ mod tests {
         assert!(s.contains("# HELP http_requests_total Total HTTP requests"));
         assert!(s.contains("# TYPE http_requests_total counter"));
         assert!(s.contains("http_requests_total 42"));
+    }
+
+    #[test]
+    fn render_to_string_returns_valid_utf8() {
+        let metrics = vec![(
+            "http_requests_total",
+            "Total HTTP requests",
+            MetricKind::Counter,
+            MetricSnapshot::Counter(7),
+        )];
+        let s = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert!(s.contains("http_requests_total 7"));
+        assert!(s.is_ascii());
     }
 
     #[test]

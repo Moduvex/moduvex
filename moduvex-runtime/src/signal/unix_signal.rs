@@ -250,9 +250,21 @@ impl Future for Signal {
             return Poll::Ready(self.kind);
         }
 
-        // Register waker and wait.
-        // Replace any existing waker for this future (re-poll).
-        state.waiters.push((self.kind, cx.waker().clone()));
+        // Register waker and wait. Replace existing waker for this future on re-poll
+        // to avoid duplicate waker accumulation across multiple poll() calls.
+        let kind = self.kind;
+        let new_waker = cx.waker().clone();
+        // Find existing entry for this kind and replace if same task (will_wake),
+        // otherwise append. This avoids O(N) scan for the common single-waiter case.
+        let existing = state
+            .waiters
+            .iter_mut()
+            .find(|(k, w)| *k == kind && w.will_wake(&new_waker));
+        if let Some((_, w)) = existing {
+            *w = new_waker;
+        } else {
+            state.waiters.push((kind, new_waker));
+        }
         Poll::Pending
     }
 }
