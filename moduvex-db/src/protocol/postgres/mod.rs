@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod codec;
 pub mod pg_types;
+pub mod prepared;
 pub mod wire;
 
 use std::collections::HashMap;
@@ -24,9 +25,14 @@ use crate::protocol::postgres::codec::{
     decode_backend, encode_password, encode_query, encode_startup, BackendMessage, ColumnDesc,
     MSG_AUTH, MSG_PASSWORD, MSG_QUERY, MSG_TERMINATE,
 };
+use crate::protocol::postgres::prepared::{
+    PreparedStatement,
+    close_statement, execute_prepared as exec_prepared, prepare as pg_prepare,
+};
 use crate::protocol::postgres::wire::{
     read_backend_message, write_frontend_message, write_startup_message,
 };
+use crate::query::param::Param;
 
 // ── Row/Column/RowSet — defined here to avoid circular dep with query module ──
 
@@ -179,6 +185,15 @@ impl PgConnection {
                         "unexpected auth message during query".into(),
                     ));
                 }
+                // Extended query protocol messages are unexpected during simple query
+                BackendMessage::ParseComplete
+                | BackendMessage::BindComplete
+                | BackendMessage::NoData
+                | BackendMessage::ParameterDescription(_) => {
+                    return Err(DbError::Protocol(
+                        "unexpected extended protocol message during simple query".into(),
+                    ));
+                }
             }
         }
 
@@ -212,6 +227,51 @@ impl PgConnection {
             }
         }
         Ok(affected)
+    }
+
+    // ── Extended query protocol ───────────────────────────────────────────────
+
+    /// Prepare a SQL statement using the extended query protocol.
+    ///
+    /// Sends Parse + Describe + Sync to the server and returns a
+    /// `PreparedStatement` with parameter type OIDs and column metadata.
+    ///
+    /// Use `name = ""` for an unnamed (single-use) statement; use a unique
+    /// name if you plan to reuse it across multiple `execute_prepared` calls.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let stmt = conn.prepare("SELECT id FROM users WHERE name = $1").await?;
+    /// let rows = conn.execute_prepared(&stmt, &[Param::Text("Alice".into())]).await?;
+    /// ```
+    pub async fn prepare(&mut self, sql: &str) -> Result<PreparedStatement> {
+        pg_prepare(&mut self.stream, "", sql).await
+    }
+
+    /// Prepare a named statement (survives until `close_prepared` or disconnect).
+    ///
+    /// Named statements allow the server to cache the query plan for repeated use.
+    pub async fn prepare_named(&mut self, name: &str, sql: &str) -> Result<PreparedStatement> {
+        pg_prepare(&mut self.stream, name, sql).await
+    }
+
+    /// Execute a previously prepared statement with bound parameters.
+    ///
+    /// Returns all result rows. Use text format for parameters and results.
+    pub async fn execute_prepared(
+        &mut self,
+        stmt: &PreparedStatement,
+        params: &[Param],
+    ) -> Result<PgRowSet> {
+        exec_prepared(&mut self.stream, stmt, params).await
+    }
+
+    /// Close a named prepared statement to release server-side resources.
+    ///
+    /// Only needed for named statements. Unnamed (`""`) statements are
+    /// automatically released on next Parse.
+    pub async fn close_prepared(&mut self, name: &str) -> Result<()> {
+        close_statement(&mut self.stream, name).await
     }
 
     /// Send the `Terminate` message and close the connection gracefully.

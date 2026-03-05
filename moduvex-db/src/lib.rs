@@ -53,6 +53,8 @@ pub use pool::{ConnectionPool, PoolConfig};
 
 // Protocol — raw PG types
 pub use protocol::postgres::{PgColumn, PgConnection, PgRow, PgRowSet};
+// Extended query protocol
+pub use protocol::postgres::prepared::PreparedStatement;
 
 // Query layer — typed accessors
 pub use query::builder::QueryBuilder as Query;

@@ -167,6 +167,32 @@ impl QueryBuilder {
         let (sql, params) = self.build();
         substitute_params(&sql, &params)
     }
+
+    /// Execute this query on `conn` using the extended query protocol.
+    ///
+    /// Prepares the SQL (unnamed statement), binds the parameters, executes,
+    /// and returns all result rows as a typed `RowSet`.
+    ///
+    /// This is more efficient and safer than `build_inlined()` + `conn.query()`
+    /// because parameters are transmitted separately (no SQL injection risk,
+    /// no manual escaping).
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let rows = QueryBuilder::select("users")?
+    ///     .where_eq("active", true)?
+    ///     .execute_on(&mut conn)
+    ///     .await?;
+    /// ```
+    pub async fn execute_on(
+        self,
+        conn: &mut crate::protocol::postgres::PgConnection,
+    ) -> Result<super::RowSet> {
+        let (sql, params) = self.build();
+        let stmt = conn.prepare(&sql).await?;
+        let pg_rowset = conn.execute_prepared(&stmt, &params).await?;
+        Ok(super::RowSet::from(pg_rowset))
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

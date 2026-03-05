@@ -1,10 +1,18 @@
-//! Encode/decode PostgreSQL frontend and backend messages (simple query protocol).
+//! Encode/decode PostgreSQL frontend and backend messages.
+//!
+//! Covers both simple query protocol and extended query protocol.
 //!
 //! Frontend (client→server):
-//!   - `StartupMessage`  — open connection, send user/database params
-//!   - `Query`           — simple query (Q)
-//!   - `PasswordMessage` — auth response (p)
-//!   - `Terminate`       — close connection (X)
+//!   - `StartupMessage`       — open connection, send user/database params
+//!   - `Query`                — simple query (Q)
+//!   - `PasswordMessage`      — auth response (p)
+//!   - `Terminate`            — close connection (X)
+//!   - `Parse`                — extended: prepare a named statement (P)
+//!   - `Bind`                 — extended: bind params to a portal (B)
+//!   - `Describe`             — extended: describe a statement or portal (D)
+//!   - `Execute`              — extended: execute a portal (E)
+//!   - `Sync`                 — extended: flush pipeline (S)
+//!   - `Close`                — extended: close statement or portal (C)
 //!
 //! Backend (server→client):
 //!   - `AuthenticationOk`          (R, sub=0)
@@ -16,6 +24,10 @@
 //!   - `CommandComplete`           (C)
 //!   - `ErrorResponse`             (E)
 //!   - `NoticeResponse`            (N) — silently ignored
+//!   - `ParseComplete`             (1) — extended protocol
+//!   - `BindComplete`              (2) — extended protocol
+//!   - `NoData`                    (n) — extended protocol (no result set)
+//!   - `ParameterDescription`      (t) — extended protocol
 
 use crate::error::{DbError, Result};
 use crate::protocol::postgres::pg_types::PgType;
@@ -26,6 +38,14 @@ use crate::protocol::postgres::wire::{read_cstring, write_cstring};
 pub const MSG_QUERY: u8 = b'Q';
 pub const MSG_PASSWORD: u8 = b'p';
 pub const MSG_TERMINATE: u8 = b'X';
+
+// Extended query protocol frontend messages
+pub const MSG_PARSE: u8 = b'P';
+pub const MSG_BIND: u8 = b'B';
+pub const MSG_DESCRIBE: u8 = b'D';
+pub const MSG_EXECUTE: u8 = b'E';
+pub const MSG_SYNC: u8 = b'S';
+pub const MSG_CLOSE: u8 = b'C';
 
 // ── Backend message type bytes ────────────────────────────────────────────────
 
@@ -38,7 +58,102 @@ pub const MSG_COMMAND_COMPLETE: u8 = b'C';
 pub const MSG_ERROR_RESPONSE: u8 = b'E';
 pub const MSG_NOTICE_RESPONSE: u8 = b'N';
 
+// Extended query protocol backend messages
+pub const MSG_PARSE_COMPLETE: u8 = b'1';
+pub const MSG_BIND_COMPLETE: u8 = b'2';
+pub const MSG_NO_DATA: u8 = b'n';
+pub const MSG_PARAM_DESCRIPTION: u8 = b't';
+
 // ── Frontend encoders ─────────────────────────────────────────────────────────
+
+// ── Extended query protocol encoders ─────────────────────────────────────────
+
+/// Build a `Parse` message payload.
+///
+/// Format: `[name\0][query\0][num_params: i16][param_oid: i32 BE ...]`
+///
+/// Use `name = ""` for an unnamed (one-shot) prepared statement.
+/// Pass `param_oids = &[]` to let PostgreSQL infer types.
+pub fn encode_parse(name: &str, query: &str, param_oids: &[u32]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    write_cstring(&mut buf, name);
+    write_cstring(&mut buf, query);
+    buf.extend_from_slice(&(param_oids.len() as i16).to_be_bytes());
+    for &oid in param_oids {
+        buf.extend_from_slice(&oid.to_be_bytes());
+    }
+    buf
+}
+
+/// Build a `Bind` message payload (text format for both params and results).
+///
+/// Format:
+/// `[portal\0][stmt\0][num_format_codes: i16][param_format: i16 ...]`
+/// `[num_params: i16][(len: i32, data: bytes) or (-1 for NULL) ...]`
+/// `[num_result_format_codes: i16][result_format: i16 ...]`
+///
+/// All format codes set to 0 = text format.
+pub fn encode_bind(portal: &str, stmt: &str, params: &[Option<Vec<u8>>]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    write_cstring(&mut buf, portal);
+    write_cstring(&mut buf, stmt);
+    // num_format_codes = 0 means use text for all params
+    buf.extend_from_slice(&0i16.to_be_bytes());
+    // num_params
+    buf.extend_from_slice(&(params.len() as i16).to_be_bytes());
+    for param in params {
+        match param {
+            None => {
+                // NULL
+                buf.extend_from_slice(&(-1i32).to_be_bytes());
+            }
+            Some(data) => {
+                buf.extend_from_slice(&(data.len() as i32).to_be_bytes());
+                buf.extend_from_slice(data);
+            }
+        }
+    }
+    // num_result_format_codes = 0 means text for all result columns
+    buf.extend_from_slice(&0i16.to_be_bytes());
+    buf
+}
+
+/// Build an `Execute` message payload.
+///
+/// Format: `[portal\0][max_rows: i32 BE]`
+///
+/// `max_rows = 0` means no limit (fetch all).
+pub fn encode_execute(portal: &str, max_rows: i32) -> Vec<u8> {
+    let mut buf = Vec::new();
+    write_cstring(&mut buf, portal);
+    buf.extend_from_slice(&max_rows.to_be_bytes());
+    buf
+}
+
+/// Build a `Describe` message payload.
+///
+/// Format: `[target: u8 ('S' = statement, 'P' = portal)][name\0]`
+pub fn encode_describe(target: u8, name: &str) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.push(target);
+    write_cstring(&mut buf, name);
+    buf
+}
+
+/// Build a `Sync` message payload (empty — sync just flushes the pipeline).
+pub fn encode_sync() -> Vec<u8> {
+    Vec::new()
+}
+
+/// Build a `Close` message payload.
+///
+/// Format: `[target: u8 ('S' or 'P')][name\0]`
+pub fn encode_close(target: u8, name: &str) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.push(target);
+    write_cstring(&mut buf, name);
+    buf
+}
 
 /// Build the startup message payload.
 ///
@@ -98,6 +213,15 @@ pub enum BackendMessage {
     },
     /// Ignored notice.
     NoticeResponse,
+    // ── Extended query protocol responses ─────────────────────────────────────
+    /// Parse completed successfully.
+    ParseComplete,
+    /// Bind completed successfully.
+    BindComplete,
+    /// Statement has no result columns (e.g. INSERT/UPDATE/DELETE).
+    NoData,
+    /// Parameter type OIDs for a prepared statement.
+    ParameterDescription(Vec<u32>),
 }
 
 /// Column metadata from a `RowDescription` message.
@@ -119,6 +243,11 @@ pub fn decode_backend(msg_type: u8, payload: &[u8]) -> Result<BackendMessage> {
         MSG_COMMAND_COMPLETE => decode_command_complete(payload),
         MSG_ERROR_RESPONSE => decode_error_response(payload),
         MSG_NOTICE_RESPONSE => Ok(BackendMessage::NoticeResponse),
+        // Extended query protocol responses
+        MSG_PARSE_COMPLETE => Ok(BackendMessage::ParseComplete),
+        MSG_BIND_COMPLETE => Ok(BackendMessage::BindComplete),
+        MSG_NO_DATA => Ok(BackendMessage::NoData),
+        MSG_PARAM_DESCRIPTION => decode_parameter_description(payload),
         other => Err(DbError::Protocol(format!(
             "unexpected backend message type: 0x{other:02X}"
         ))),
@@ -225,6 +354,33 @@ fn decode_data_row(payload: &[u8]) -> Result<BackendMessage> {
 fn decode_command_complete(payload: &[u8]) -> Result<BackendMessage> {
     let (tag, _) = read_cstring(payload, 0)?;
     Ok(BackendMessage::CommandComplete { tag })
+}
+
+/// Decode a `ParameterDescription` message — returns the list of parameter OIDs.
+fn decode_parameter_description(payload: &[u8]) -> Result<BackendMessage> {
+    if payload.len() < 2 {
+        return Err(DbError::Protocol(
+            "ParameterDescription message too short".into(),
+        ));
+    }
+    let count = u16::from_be_bytes([payload[0], payload[1]]) as usize;
+    if payload.len() < 2 + count * 4 {
+        return Err(DbError::Protocol(
+            "ParameterDescription payload truncated".into(),
+        ));
+    }
+    let mut oids = Vec::with_capacity(count);
+    for i in 0..count {
+        let off = 2 + i * 4;
+        let oid = u32::from_be_bytes([
+            payload[off],
+            payload[off + 1],
+            payload[off + 2],
+            payload[off + 3],
+        ]);
+        oids.push(oid);
+    }
+    Ok(BackendMessage::ParameterDescription(oids))
 }
 
 fn decode_error_response(payload: &[u8]) -> Result<BackendMessage> {
@@ -375,6 +531,130 @@ mod tests {
                 assert_eq!(fields[1], None);
             }
             _ => panic!("expected DataRow"),
+        }
+    }
+
+    // ── Extended query protocol codec tests ───────────────────────────────────
+
+    #[test]
+    fn encode_parse_no_params() {
+        let payload = encode_parse("my_stmt", "SELECT $1", &[]);
+        // "my_stmt\0SELECT $1\0" + i16(0) for no param OIDs
+        assert!(payload.starts_with(b"my_stmt\0SELECT $1\0"));
+        let tail = &payload[payload.len() - 2..];
+        assert_eq!(tail, &0i16.to_be_bytes());
+    }
+
+    #[test]
+    fn encode_parse_with_param_oid() {
+        let payload = encode_parse("", "SELECT $1", &[23u32]); // int4 OID=23
+        // unnamed stmt: "\0SELECT $1\0" + i16(1) + u32(23)
+        assert!(payload.starts_with(b"\0SELECT $1\0"));
+        let num_off = payload.len() - 6;
+        let num = i16::from_be_bytes([payload[num_off], payload[num_off + 1]]);
+        assert_eq!(num, 1);
+        let oid = u32::from_be_bytes([
+            payload[num_off + 2],
+            payload[num_off + 3],
+            payload[num_off + 4],
+            payload[num_off + 5],
+        ]);
+        assert_eq!(oid, 23);
+    }
+
+    #[test]
+    fn encode_bind_no_params() {
+        let payload = encode_bind("", "", &[]);
+        // portal\0 + stmt\0 + i16(0) format codes + i16(0) params + i16(0) result formats
+        assert_eq!(payload, b"\0\0\x00\x00\x00\x00\x00\x00".to_vec());
+    }
+
+    #[test]
+    fn encode_bind_with_text_param() {
+        let param = Some(b"42".to_vec());
+        let payload = encode_bind("", "my_stmt", &[param]);
+        // portal="\0", stmt="my_stmt\0", i16(0) fmt, i16(1) params, i32(2) + "42", i16(0) res_fmt
+        assert!(payload.starts_with(b"\0my_stmt\0"));
+    }
+
+    #[test]
+    fn encode_bind_null_param() {
+        let payload = encode_bind("", "", &[None]);
+        // Check that NULL is encoded as -1 (i32)
+        // Layout: "\0\0" + i16(0) + i16(1) + i32(-1) + i16(0)
+        let start = 4; // "\0\0\x00\x00" = 4 bytes
+        let num_params = i16::from_be_bytes([payload[start], payload[start + 1]]);
+        assert_eq!(num_params, 1);
+        let len = i32::from_be_bytes([
+            payload[start + 2],
+            payload[start + 3],
+            payload[start + 4],
+            payload[start + 5],
+        ]);
+        assert_eq!(len, -1);
+    }
+
+    #[test]
+    fn encode_execute_zero_max_rows() {
+        let payload = encode_execute("", 0);
+        assert_eq!(payload, b"\x00\x00\x00\x00\x00".to_vec());
+    }
+
+    #[test]
+    fn encode_describe_statement() {
+        let payload = encode_describe(b'S', "my_stmt");
+        assert_eq!(payload[0], b'S');
+        assert_eq!(&payload[1..], b"my_stmt\0");
+    }
+
+    #[test]
+    fn encode_sync_is_empty() {
+        assert!(encode_sync().is_empty());
+    }
+
+    #[test]
+    fn decode_parse_complete() {
+        let msg = decode_backend(MSG_PARSE_COMPLETE, &[]).unwrap();
+        assert!(matches!(msg, BackendMessage::ParseComplete));
+    }
+
+    #[test]
+    fn decode_bind_complete() {
+        let msg = decode_backend(MSG_BIND_COMPLETE, &[]).unwrap();
+        assert!(matches!(msg, BackendMessage::BindComplete));
+    }
+
+    #[test]
+    fn decode_no_data() {
+        let msg = decode_backend(MSG_NO_DATA, &[]).unwrap();
+        assert!(matches!(msg, BackendMessage::NoData));
+    }
+
+    #[test]
+    fn decode_parameter_description_two_oids() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u16.to_be_bytes()); // count=2
+        payload.extend_from_slice(&23u32.to_be_bytes()); // int4
+        payload.extend_from_slice(&25u32.to_be_bytes()); // text
+        let msg = decode_backend(MSG_PARAM_DESCRIPTION, &payload).unwrap();
+        match msg {
+            BackendMessage::ParameterDescription(oids) => {
+                assert_eq!(oids, vec![23, 25]);
+            }
+            _ => panic!("expected ParameterDescription"),
+        }
+    }
+
+    #[test]
+    fn decode_parameter_description_empty() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_be_bytes()); // count=0
+        let msg = decode_backend(MSG_PARAM_DESCRIPTION, &payload).unwrap();
+        match msg {
+            BackendMessage::ParameterDescription(oids) => {
+                assert!(oids.is_empty());
+            }
+            _ => panic!("expected ParameterDescription"),
         }
     }
 }
