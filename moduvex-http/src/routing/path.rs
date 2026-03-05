@@ -191,4 +191,80 @@ mod tests {
         // Wildcard is at position 1; "extra" is at position 2 (unreachable).
         assert!(segs.iter().any(|s| matches!(s, PathSegment::Wildcard(_))));
     }
+
+    #[test]
+    fn parse_empty_pattern_returns_empty_segments() {
+        assert_eq!(parse_pattern(""), vec![]);
+    }
+
+    #[test]
+    fn parse_root_only_returns_empty() {
+        assert_eq!(parse_pattern("/"), vec![]);
+    }
+
+    #[test]
+    fn parse_multiple_params_produces_correct_count() {
+        let segs = parse_pattern("/:a/:b/:c");
+        assert_eq!(segs.len(), 3);
+        assert!(matches!(segs[0], PathSegment::Param(_)));
+        assert!(matches!(segs[1], PathSegment::Param(_)));
+        assert!(matches!(segs[2], PathSegment::Param(_)));
+    }
+
+    #[test]
+    fn match_root_with_slash() {
+        let segs = parse_pattern("/");
+        // Both "/" and "" should match root (empty segment list)
+        assert!(match_path(&segs, "/").is_some());
+        assert!(match_path(&segs, "").is_some());
+    }
+
+    #[test]
+    fn match_wildcard_empty_remainder() {
+        let segs = parse_pattern("/files/*rest");
+        let m = match_path(&segs, "/files/").unwrap();
+        // Empty remainder after /files/ — wildcard captures ""
+        assert_eq!(m[0].0, "rest");
+        assert_eq!(m[0].1, "");
+    }
+
+    #[test]
+    fn match_wildcard_single_segment() {
+        let segs = parse_pattern("/files/*rest");
+        let m = match_path(&segs, "/files/readme.txt").unwrap();
+        assert_eq!(m[0].1, "readme.txt");
+    }
+
+    #[test]
+    fn match_url_segment_with_dots_preserved() {
+        let segs = parse_pattern("/files/:name");
+        let m = match_path(&segs, "/files/my.file.txt").unwrap();
+        assert_eq!(m[0].1, "my.file.txt");
+    }
+
+    #[test]
+    fn match_numeric_param() {
+        let segs = parse_pattern("/items/:id");
+        let m = match_path(&segs, "/items/12345").unwrap();
+        assert_eq!(m[0].1, "12345");
+    }
+
+    #[test]
+    fn match_hyphenated_segment() {
+        let segs = parse_pattern("/well-known/:token");
+        let m = match_path(&segs, "/well-known/abc-def-ghi").unwrap();
+        assert_eq!(m[0].1, "abc-def-ghi");
+    }
+
+    #[test]
+    fn match_missing_required_segment() {
+        let segs = parse_pattern("/a/b/c");
+        assert!(match_path(&segs, "/a/b").is_none());
+    }
+
+    #[test]
+    fn match_extra_segment_fails() {
+        let segs = parse_pattern("/a/b");
+        assert!(match_path(&segs, "/a/b/c").is_none());
+    }
 }

@@ -243,4 +243,115 @@ mod tests {
         }
         dir
     }
+
+    // ── Additional runner tests ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_version_single_digit() {
+        assert_eq!(parse_version("1_create.sql"), Some(1));
+    }
+
+    #[test]
+    fn parse_version_large_number() {
+        assert_eq!(parse_version("20240101000000_init.sql"), Some(20240101000000));
+    }
+
+    #[test]
+    fn parse_version_only_digits() {
+        assert_eq!(parse_version("123456.sql"), Some(123456));
+    }
+
+    #[test]
+    fn parse_version_starts_with_letter() {
+        assert_eq!(parse_version("v001_create.sql"), None);
+    }
+
+    #[test]
+    fn migration_equality_by_version() {
+        let m1 = Migration {
+            version: 1,
+            filename: "001_a.sql".into(),
+            sql: "SELECT 1".into(),
+        };
+        let m2 = Migration {
+            version: 1,
+            filename: "001_a.sql".into(),
+            sql: "SELECT 1".into(),
+        };
+        assert_eq!(m1, m2);
+    }
+
+    #[test]
+    fn migration_ordering_desc() {
+        let m_high = Migration {
+            version: 10,
+            filename: "010.sql".into(),
+            sql: "".into(),
+        };
+        let m_low = Migration {
+            version: 1,
+            filename: "001.sql".into(),
+            sql: "".into(),
+        };
+        assert!(m_high > m_low);
+    }
+
+    #[test]
+    fn insert_applied_sql_version_in_values() {
+        let sql = insert_applied_sql(42, "042_test.sql");
+        assert!(sql.contains("42"));
+        assert!(sql.contains("042_test.sql") || sql.contains("$mig$"));
+    }
+
+    #[test]
+    fn insert_applied_sql_strips_tag_in_filename() {
+        // If filename itself contains $mig$, it's stripped
+        let sql = insert_applied_sql(1, "001_$mig$test.sql");
+        assert!(!sql.contains("$mig$test"), "embedded $mig$ tag must be removed");
+    }
+
+    #[test]
+    fn load_migrations_skips_non_sql_files() {
+        let dir = tempdir_with_files(&[
+            ("001_create.sql", "CREATE TABLE a (id INT);"),
+            ("README.md", "# Migrations"),
+            ("schema.json", "{}"),
+        ]);
+        let migrations = load_migrations(&dir).unwrap();
+        assert_eq!(migrations.len(), 1);
+        assert_eq!(migrations[0].filename, "001_create.sql");
+    }
+
+    #[test]
+    fn load_migrations_sorts_by_version() {
+        let dir = tempdir_with_files(&[
+            ("003_third.sql", "SELECT 3;"),
+            ("001_first.sql", "SELECT 1;"),
+            ("002_second.sql", "SELECT 2;"),
+        ]);
+        let migrations = load_migrations(&dir).unwrap();
+        assert_eq!(migrations.len(), 3);
+        assert_eq!(migrations[0].version, 1);
+        assert_eq!(migrations[1].version, 2);
+        assert_eq!(migrations[2].version, 3);
+    }
+
+    #[test]
+    fn migration_sql_content_loaded() {
+        let dir = tempdir_with_files(&[("001_test.sql", "CREATE TABLE test (id SERIAL);")]);
+        let migrations = load_migrations(&dir).unwrap();
+        assert_eq!(migrations.len(), 1);
+        assert!(migrations[0].sql.contains("CREATE TABLE test"));
+    }
+
+    #[test]
+    fn create_tracking_table_sql_contains_table_name() {
+        assert!(CREATE_TRACKING_TABLE_SQL.contains("_moduvex_migrations"));
+    }
+
+    #[test]
+    fn select_applied_sql_selects_version() {
+        assert!(SELECT_APPLIED_SQL.contains("version"));
+        assert!(SELECT_APPLIED_SQL.contains("_moduvex_migrations"));
+    }
 }

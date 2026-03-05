@@ -234,4 +234,58 @@ mod tests {
         assert_eq!(format!("{}", StatusCode::OK), "200 OK");
         assert_eq!(format!("{}", StatusCode::NOT_FOUND), "404 Not Found");
     }
+
+    #[test]
+    fn status_200_reason() {
+        assert_eq!(StatusCode::OK.canonical_reason(), "OK");
+    }
+
+    #[test]
+    fn status_404_reason() {
+        assert_eq!(StatusCode::NOT_FOUND.canonical_reason(), "Not Found");
+    }
+
+    #[test]
+    fn status_500_reason() {
+        assert_eq!(
+            StatusCode::INTERNAL_SERVER_ERROR.canonical_reason(),
+            "Internal Server Error"
+        );
+    }
+
+    #[test]
+    fn status_201_as_u16() {
+        let code = StatusCode::CREATED;
+        assert_eq!(code.as_u16(), 201);
+    }
+
+    #[test]
+    fn status_204_no_content_is_success() {
+        assert!(StatusCode::NO_CONTENT.is_success());
+    }
+
+    #[test]
+    fn status_400_is_client_error() {
+        assert!(StatusCode::BAD_REQUEST.is_client_error());
+        assert!(!StatusCode::BAD_REQUEST.is_server_error());
+    }
+
+    #[test]
+    fn status_503_is_server_error() {
+        assert!(StatusCode::SERVICE_UNAVAILABLE.is_server_error());
+        assert!(!StatusCode::SERVICE_UNAVAILABLE.is_client_error());
+    }
+
+    #[test]
+    fn status_301_reason() {
+        assert_eq!(StatusCode::MOVED_PERMANENTLY.canonical_reason(), "Moved Permanently");
+    }
+
+    #[test]
+    fn status_from_u16_boundary_values() {
+        assert!(StatusCode::from_u16(100).is_some());
+        assert!(StatusCode::from_u16(599).is_some());
+        assert!(StatusCode::from_u16(99).is_none());
+        assert!(StatusCode::from_u16(600).is_none());
+    }
 }

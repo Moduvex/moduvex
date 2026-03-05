@@ -262,4 +262,160 @@ mod tests {
         let result = substitute_params(sql, &params).unwrap();
         assert_eq!(result, "SELECT * FROM t WHERE col = '$1' AND id = 42");
     }
+
+    // ── Additional param tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn param_bool_true_encode_text() {
+        let p = Param::Bool(true);
+        assert_eq!(p.encode_text(), Some("t".into()));
+    }
+
+    #[test]
+    fn param_bool_false_encode_text() {
+        let p = Param::Bool(false);
+        assert_eq!(p.encode_text(), Some("f".into()));
+    }
+
+    #[test]
+    fn param_null_encode_text_is_none() {
+        let p = Param::Null;
+        assert_eq!(p.encode_text(), None);
+    }
+
+    #[test]
+    fn param_int4_encode_text() {
+        let p = Param::Int4(42);
+        assert_eq!(p.encode_text(), Some("42".into()));
+    }
+
+    #[test]
+    fn param_int4_negative_inlined() {
+        let sql = "SELECT * FROM t WHERE x = $1";
+        let params = vec![Param::Int4(-99)];
+        let result = substitute_params(sql, &params).unwrap();
+        assert!(result.contains("-99"));
+    }
+
+    #[test]
+    fn param_int8_max_inlined() {
+        let sql = "SELECT $1";
+        let params = vec![Param::Int8(i64::MAX)];
+        let result = substitute_params(sql, &params).unwrap();
+        assert!(result.contains(&i64::MAX.to_string()));
+    }
+
+    #[test]
+    fn param_text_with_single_quote_escaped() {
+        let sql = "SELECT $1";
+        let params = vec![Param::Text("O'Brien".into())];
+        let result = substitute_params(sql, &params).unwrap();
+        // Single quotes must be escaped: O''Brien
+        assert!(result.contains("O''Brien") || result.contains("O\\'Brien"));
+    }
+
+    #[test]
+    fn param_text_special_chars_inlined() {
+        let sql = "SELECT $1";
+        let params = vec![Param::Text("hello world".into())];
+        let result = substitute_params(sql, &params).unwrap();
+        assert!(result.contains("'hello world'"));
+    }
+
+    #[test]
+    fn param_float8_encode_text() {
+        let p = Param::Float8(3.14);
+        let s = p.encode_text().unwrap();
+        assert!(s.starts_with("3.14"));
+    }
+
+    #[test]
+    fn param_bytes_hex_encoded() {
+        let p = Param::Bytes(vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        let s = p.to_sql_literal();
+        // Should contain hex: deadbeef
+        assert!(s.contains("dead") || s.contains("DEAD"));
+        assert!(s.contains("beef") || s.contains("BEEF"));
+    }
+
+    #[test]
+    fn substitute_params_no_placeholders() {
+        let sql = "SELECT 1";
+        let result = substitute_params(sql, &[]).unwrap();
+        assert_eq!(result, "SELECT 1");
+    }
+
+    #[test]
+    fn substitute_params_wrong_count_fewer_params() {
+        let sql = "SELECT $1, $2";
+        let params = vec![Param::Int4(1)]; // missing $2
+        let result = substitute_params(sql, &params);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn substitute_params_out_of_order_placeholders() {
+        let sql = "SELECT $2, $1";
+        let params = vec![Param::Text("first".into()), Param::Text("second".into())];
+        let result = substitute_params(sql, &params).unwrap();
+        // $1 → 'first', $2 → 'second'
+        let second_pos = result.find("'second'").unwrap();
+        let first_pos = result.find("'first'").unwrap();
+        assert!(second_pos < first_pos, "$2 should appear before $1 in: {result}");
+    }
+
+    #[test]
+    fn param_to_param_trait_i32() {
+        let p = 42i32.to_param();
+        assert_eq!(p, Param::Int4(42));
+    }
+
+    #[test]
+    fn param_to_param_trait_bool() {
+        assert_eq!(true.to_param(), Param::Bool(true));
+        assert_eq!(false.to_param(), Param::Bool(false));
+    }
+
+    #[test]
+    fn param_to_param_trait_str() {
+        let p = "hello".to_param();
+        assert_eq!(p, Param::Text("hello".into()));
+    }
+
+    #[test]
+    fn param_to_param_trait_string() {
+        let p = String::from("world").to_param();
+        assert_eq!(p, Param::Text("world".into()));
+    }
+
+    #[test]
+    fn param_eq_same_type() {
+        assert_eq!(Param::Int4(1), Param::Int4(1));
+        assert_ne!(Param::Int4(1), Param::Int4(2));
+    }
+
+    #[test]
+    fn param_null_inlined_as_null_keyword() {
+        let sql = "SELECT $1";
+        let params = vec![Param::Null];
+        let result = substitute_params(sql, &params).unwrap();
+        assert!(result.to_uppercase().contains("NULL"));
+    }
+
+    #[test]
+    fn param_float8_zero() {
+        assert_eq!(Param::Float8(0.0).encode_text(), Some("0".into()));
+    }
+
+    #[test]
+    fn param_text_empty_string() {
+        let p = Param::Text(String::new());
+        assert_eq!(p.to_sql_literal(), "''");
+    }
+
+    #[test]
+    fn param_int8_negative_encode_text() {
+        let p = Param::Int8(-1000);
+        assert_eq!(p.encode_text(), Some("-1000".into()));
+    }
 }

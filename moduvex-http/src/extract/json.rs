@@ -112,4 +112,70 @@ mod tests {
         let body = resp.body.into_bytes();
         assert_eq!(body, b"{\"ok\":true}");
     }
+
+    #[test]
+    fn json_extract_empty_body_returns_error() {
+        // Empty body with JSON content-type → parse error
+        let mut req = Request::new(Method::POST, "/data");
+        req.headers
+            .insert("content-type", b"application/json".to_vec());
+        req.body = Body::Empty;
+
+        #[derive(Debug, serde::Deserialize)]
+        struct Payload {}
+
+        let err = Json::<Payload>::from_request(&mut req).unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn json_extract_nested_struct() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Inner {
+            value: u32,
+        }
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Outer {
+            inner: Inner,
+        }
+
+        let mut req = Request::new(Method::POST, "/");
+        req.headers
+            .insert("content-type", b"application/json".to_vec());
+        req.body = Body::from_bytes(br#"{"inner":{"value":99}}"#.to_vec());
+        let Json(outer) = Json::<Outer>::from_request(&mut req).unwrap();
+        assert_eq!(outer.inner.value, 99);
+    }
+
+    #[test]
+    fn json_extract_consumes_body() {
+        // Body should be Empty after extraction
+        let mut req = Request::new(Method::POST, "/");
+        req.headers
+            .insert("content-type", b"application/json".to_vec());
+        req.body = Body::from_bytes(b"{\"x\":1}".to_vec());
+
+        #[derive(serde::Deserialize)]
+        struct Payload {
+            x: u32,
+        }
+
+        let _ = Json::<Payload>::from_request(&mut req).unwrap();
+        // Body replaced with Empty
+        assert!(matches!(req.body, Body::Empty));
+    }
+
+    #[test]
+    fn json_into_response_sets_content_type() {
+        #[derive(serde::Serialize)]
+        struct Payload {
+            msg: &'static str,
+        }
+
+        let resp = Json(Payload { msg: "hi" }).into_response();
+        assert_eq!(
+            resp.headers.get_str("content-type"),
+            Some("application/json")
+        );
+    }
 }

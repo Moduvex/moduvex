@@ -348,4 +348,145 @@ mod tests {
             panic!("expected Infra variant");
         }
     }
+
+    #[test]
+    fn context_error_display_format() {
+        let inner: Box<dyn std::error::Error + Send + Sync> =
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, "base error"));
+        let ctx_err = ContextError {
+            context: "while doing X".to_string(),
+            source: inner,
+        };
+        let s = ctx_err.to_string();
+        assert!(s.contains("while doing X"), "got: {s}");
+        assert!(s.contains("base error"), "got: {s}");
+    }
+
+    #[test]
+    fn context_error_source_chain() {
+        use std::error::Error;
+        let inner: Box<dyn std::error::Error + Send + Sync> =
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, "cause"));
+        let ctx_err = ContextError {
+            context: "context".to_string(),
+            source: inner,
+        };
+        assert!(ctx_err.source().is_some());
+    }
+
+    #[test]
+    fn wrap_other_variant_stays_other() {
+        #[derive(Debug)]
+        struct Misc;
+        impl fmt::Display for Misc {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "misc")
+            }
+        }
+        impl std::error::Error for Misc {}
+
+        let err = ModuvexError::Other(Box::new(Misc));
+        let wrapped = wrap_with_context(err, "extra context".to_string());
+        assert!(
+            matches!(wrapped, ModuvexError::Other(_)),
+            "Other variant should stay Other"
+        );
+        assert!(wrapped.to_string().contains("extra context"));
+    }
+
+    #[test]
+    fn with_context_lazy_closure_not_called_on_ok() {
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let c = std::sync::Arc::clone(&called);
+        let result: Result<u32, ModuvexError> = Ok(42);
+        let _ = result.with_context(move || {
+            c.store(true, std::sync::atomic::Ordering::SeqCst);
+            "should not be called".to_string()
+        });
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn context_on_ok_passes_through() {
+        let result: Result<u32, ModuvexError> = Ok(99);
+        let out = result.context("irrelevant context").unwrap();
+        assert_eq!(out, 99);
+    }
+
+    #[test]
+    fn lifecycle_context_contains_both_messages() {
+        use crate::error::classify::LifecycleError;
+        let result: Result<(), ModuvexError> =
+            Err(ModuvexError::Lifecycle(LifecycleError::new("root cause").in_module("M")))
+                .context("outer context");
+        let err = result.unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("outer context"), "got: {s}");
+        assert!(s.contains("root cause"), "got: {s}");
+    }
+
+    #[test]
+    fn config_context_contains_both_messages() {
+        let result: Result<(), ModuvexError> =
+            Err(ModuvexError::Config(ConfigError::new("original")))
+                .context("adding context");
+        let err = result.unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("adding context"), "got: {s}");
+        assert!(s.contains("original"), "got: {s}");
+    }
+
+    #[test]
+    fn domain_context_preserves_http_status() {
+        #[derive(Debug)]
+        struct Conflict;
+        impl fmt::Display for Conflict {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "conflict")
+            }
+        }
+        impl std::error::Error for Conflict {}
+        impl DomainError for Conflict {
+            fn error_code(&self) -> &str { "conflict.resource" }
+            fn http_status(&self) -> u16 { 409 }
+        }
+
+        let wrapped = wrap_with_context(
+            ModuvexError::Domain(Box::new(Conflict)),
+            "wrapping".to_string(),
+        );
+
+        if let ModuvexError::Domain(ref e) = wrapped {
+            assert_eq!(e.http_status(), 409);
+            assert_eq!(e.error_code(), "conflict.resource");
+        } else {
+            panic!("expected Domain variant");
+        }
+    }
+
+    #[test]
+    fn non_retryable_infra_context_preserves_non_retryable() {
+        #[derive(Debug)]
+        struct PermErr;
+        impl fmt::Display for PermErr {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "permission denied")
+            }
+        }
+        impl std::error::Error for PermErr {}
+        impl InfraError for PermErr {
+            fn is_retryable(&self) -> bool { false }
+        }
+
+        let wrapped = wrap_with_context(
+            ModuvexError::Infra(Box::new(PermErr)),
+            "ctx".to_string(),
+        );
+
+        if let ModuvexError::Infra(ref e) = wrapped {
+            assert!(!e.is_retryable());
+        } else {
+            panic!("expected Infra variant");
+        }
+    }
 }

@@ -165,4 +165,123 @@ mod tests {
         assert_eq!(Value::U64(100).to_string(), "100");
         assert_eq!(Value::Bool(true).to_string(), "true");
     }
+
+    #[test]
+    fn level_as_str() {
+        assert_eq!(Level::Trace.as_str(), "TRACE");
+        assert_eq!(Level::Debug.as_str(), "DEBUG");
+        assert_eq!(Level::Info.as_str(), "INFO");
+        assert_eq!(Level::Warn.as_str(), "WARN");
+        assert_eq!(Level::Error.as_str(), "ERROR");
+    }
+
+    #[test]
+    fn level_display_matches_as_str() {
+        for &lvl in &[Level::Trace, Level::Debug, Level::Info, Level::Warn, Level::Error] {
+            assert_eq!(lvl.to_string(), lvl.as_str());
+        }
+    }
+
+    #[test]
+    fn level_equality() {
+        assert_eq!(Level::Info, Level::Info);
+        assert_ne!(Level::Info, Level::Warn);
+    }
+
+    #[test]
+    fn event_has_timestamp() {
+        let e = Event::now(Level::Debug, "ts test");
+        // Timestamp should be after year 2000 in microseconds
+        assert!(e.timestamp_us > 946_684_800_000_000);
+    }
+
+    #[test]
+    fn event_empty_fields_by_default() {
+        let e = Event::now(Level::Error, "bare event");
+        assert!(e.fields.is_empty());
+    }
+
+    #[test]
+    fn value_f64_display() {
+        assert_eq!(Value::F64(3.14).to_string(), "3.14");
+    }
+
+    #[test]
+    fn value_bool_false_display() {
+        assert_eq!(Value::Bool(false).to_string(), "false");
+    }
+
+    #[test]
+    fn value_from_str_ref() {
+        let v: Value = "hello".into();
+        assert!(matches!(v, Value::String(_)));
+        assert_eq!(v.to_string(), "hello");
+    }
+
+    #[test]
+    fn value_from_string_owned() {
+        let v: Value = String::from("owned").into();
+        assert!(matches!(v, Value::String(_)));
+    }
+
+    #[test]
+    fn value_from_i32() {
+        let v: Value = (-5_i32).into();
+        assert!(matches!(v, Value::I64(-5)));
+    }
+
+    #[test]
+    fn value_from_i64() {
+        let v: Value = i64::MIN.into();
+        assert!(matches!(v, Value::I64(_)));
+    }
+
+    #[test]
+    fn value_from_u32() {
+        let v: Value = (42_u32).into();
+        assert!(matches!(v, Value::U64(42)));
+    }
+
+    #[test]
+    fn value_from_u64() {
+        let v: Value = u64::MAX.into();
+        assert!(matches!(v, Value::U64(_)));
+    }
+
+    #[test]
+    fn value_from_f64() {
+        let v: Value = (2.718_f64).into();
+        assert!(matches!(v, Value::F64(_)));
+    }
+
+    #[test]
+    fn value_from_bool() {
+        let v: Value = true.into();
+        assert!(matches!(v, Value::Bool(true)));
+    }
+
+    #[test]
+    fn value_from_usize() {
+        let v: Value = (100_usize).into();
+        assert!(matches!(v, Value::U64(100)));
+    }
+
+    #[test]
+    fn event_multiple_fields() {
+        let e = Event::now(Level::Warn, "many fields")
+            .field("a", 1_i32)
+            .field("b", "two")
+            .field("c", true)
+            .field("d", 4.0_f64);
+        assert_eq!(e.fields.len(), 4);
+        assert_eq!(e.fields[0].0, "a");
+        assert_eq!(e.fields[1].0, "b");
+    }
+
+    #[test]
+    fn value_clone() {
+        let v = Value::String("cloned".into());
+        let v2 = v.clone();
+        assert_eq!(v.to_string(), v2.to_string());
+    }
 }

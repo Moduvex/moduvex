@@ -136,4 +136,95 @@ mod tests {
             h.join().unwrap();
         }
     }
+
+    #[test]
+    fn insert_value_wraps_in_arc() {
+        let map = TypeMap::new();
+        map.insert(42u64);
+        let got = map.get::<u64>().unwrap();
+        assert_eq!(*got, 42u64);
+    }
+
+    #[test]
+    fn distinct_types_are_independent() {
+        let map = TypeMap::new();
+        map.insert_arc(Arc::new(1u32));
+        map.insert_arc(Arc::new("hello".to_string()));
+        map.insert_arc(Arc::new(3.14f64));
+        assert_eq!(*map.get::<u32>().unwrap(), 1);
+        assert_eq!(map.get::<String>().unwrap().as_str(), "hello");
+        assert!((map.get::<f64>().unwrap().abs() - 3.14f64).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn is_empty_on_new_map() {
+        let map = TypeMap::new();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn is_empty_false_after_insert() {
+        let map = TypeMap::new();
+        map.insert(99u8);
+        assert!(!map.is_empty());
+    }
+
+    #[test]
+    fn len_after_multiple_types() {
+        let map = TypeMap::new();
+        map.insert(1u8);
+        map.insert(2u16);
+        map.insert(3u32);
+        assert_eq!(map.len(), 3);
+    }
+
+    #[test]
+    fn overwrite_does_not_increase_len() {
+        let map = TypeMap::new();
+        map.insert_arc(Arc::new(1u32));
+        map.insert_arc(Arc::new(2u32));
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn default_creates_empty_map() {
+        let map = TypeMap::default();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn concurrent_write_then_read() {
+        use std::thread;
+        let map = Arc::new(TypeMap::new());
+        // Each thread inserts its own type
+        let m1 = Arc::clone(&map);
+        let t1 = thread::spawn(move || m1.insert_arc(Arc::new(10u8)));
+        let m2 = Arc::clone(&map);
+        let t2 = thread::spawn(move || m2.insert_arc(Arc::new(20u16)));
+        t1.join().unwrap();
+        t2.join().unwrap();
+        // Both insertions should be visible
+        assert!(map.get::<u8>().is_some());
+        assert!(map.get::<u16>().is_some());
+    }
+
+    #[test]
+    fn arc_ptr_eq_for_same_insert() {
+        let map = TypeMap::new();
+        let val = Arc::new(42u32);
+        map.insert_arc(Arc::clone(&val));
+        let got = map.get::<u32>().unwrap();
+        assert!(Arc::ptr_eq(&val, &got));
+    }
+
+    #[test]
+    fn struct_types_as_keys() {
+        #[derive(Debug, PartialEq)]
+        struct MyService { id: u32 }
+
+        let map = TypeMap::new();
+        map.insert_arc(Arc::new(MyService { id: 42 }));
+        let svc = map.get::<MyService>().unwrap();
+        assert_eq!(svc.id, 42);
+    }
 }

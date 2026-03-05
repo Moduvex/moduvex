@@ -100,4 +100,74 @@ mod tests {
         let s = id.to_string();
         assert_eq!(s.len(), 16);
     }
+
+    #[test]
+    fn trace_id_all_hex_chars() {
+        let id = TraceId::generate();
+        let s = id.to_string();
+        assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn span_id_all_hex_chars() {
+        let id = SpanId::generate();
+        let s = id.to_string();
+        assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn trace_id_equality_with_same_values() {
+        let id = TraceId(0xdeadbeef, 0xcafebabe);
+        let id2 = TraceId(0xdeadbeef, 0xcafebabe);
+        assert_eq!(id, id2);
+    }
+
+    #[test]
+    fn span_id_equality_with_same_value() {
+        let id = SpanId(42);
+        let id2 = SpanId(42);
+        assert_eq!(id, id2);
+    }
+
+    #[test]
+    fn trace_id_inequality_different_high() {
+        let a = TraceId(1, 0);
+        let b = TraceId(2, 0);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn trace_id_inequality_different_low() {
+        let a = TraceId(0, 1);
+        let b = TraceId(0, 2);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn bulk_trace_ids_all_unique() {
+        use std::collections::HashSet;
+        let ids: HashSet<_> = (0..100).map(|_| TraceId::generate()).collect();
+        assert_eq!(ids.len(), 100);
+    }
+
+    #[test]
+    fn bulk_span_ids_all_unique() {
+        use std::collections::HashSet;
+        let ids: HashSet<_> = (0..100).map(|_| SpanId::generate()).collect();
+        assert_eq!(ids.len(), 100);
+    }
+
+    #[test]
+    fn trace_id_debug_format() {
+        let id = TraceId(1, 2);
+        let s = format!("{id:?}");
+        assert!(s.contains("TraceId"));
+    }
+
+    #[test]
+    fn span_id_debug_format() {
+        let id = SpanId(99);
+        let s = format!("{id:?}");
+        assert!(s.contains("SpanId"));
+    }
 }

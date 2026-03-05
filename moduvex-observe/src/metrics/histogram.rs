@@ -169,4 +169,101 @@ mod tests {
         }
         assert_eq!(h.count(), 400);
     }
+
+    #[test]
+    fn histogram_empty_has_zero_count_and_sum() {
+        let h = Histogram::new("empty_hist", "no observations", BOUNDS);
+        assert_eq!(h.count(), 0);
+        assert_eq!(h.sum(), 0.0);
+        let snap = h.snapshot();
+        // All buckets including +Inf should be zero
+        for (_, cnt) in &snap {
+            assert_eq!(*cnt, 0);
+        }
+    }
+
+    #[test]
+    fn histogram_snapshot_length_is_bounds_plus_one() {
+        let h = Histogram::new("snap_len", "", BOUNDS);
+        let snap = h.snapshot();
+        assert_eq!(snap.len(), BOUNDS.len() + 1);
+        // Last entry is +Inf
+        assert_eq!(snap.last().unwrap().0, f64::INFINITY);
+    }
+
+    #[test]
+    fn histogram_observe_exactly_on_boundary() {
+        // A value exactly equal to a boundary should land in that bucket.
+        static EXACT_BOUNDS: &[f64] = &[1.0, 2.0, 5.0];
+        let h = Histogram::new("exact", "", EXACT_BOUNDS);
+        h.observe(1.0); // hits le=1.0, le=2.0, le=5.0, +Inf
+        let snap = h.snapshot();
+        assert_eq!(snap[0].1, 1); // le=1.0
+        assert_eq!(snap[1].1, 1); // le=2.0
+        assert_eq!(snap[2].1, 1); // le=5.0
+        assert_eq!(snap[3].1, 1); // +Inf
+    }
+
+    #[test]
+    fn histogram_observe_above_all_bounds_goes_to_inf_only() {
+        static SMALL_BOUNDS: &[f64] = &[0.1, 0.5, 1.0];
+        let h = Histogram::new("big_val", "", SMALL_BOUNDS);
+        h.observe(999.0); // above all bounds — only +Inf
+        let snap = h.snapshot();
+        assert_eq!(snap[0].1, 0); // le=0.1
+        assert_eq!(snap[1].1, 0); // le=0.5
+        assert_eq!(snap[2].1, 0); // le=1.0
+        assert_eq!(snap[3].1, 1); // +Inf always gets it
+        assert_eq!(h.count(), 1);
+    }
+
+    #[test]
+    fn histogram_observe_zero() {
+        static Z_BOUNDS: &[f64] = &[0.0, 1.0];
+        let h = Histogram::new("zero_obs", "", Z_BOUNDS);
+        h.observe(0.0); // exactly on first bound
+        let snap = h.snapshot();
+        assert_eq!(snap[0].1, 1); // le=0.0
+        assert_eq!(snap[1].1, 1); // le=1.0
+        assert_eq!(snap[2].1, 1); // +Inf
+    }
+
+    #[test]
+    fn histogram_sum_accumulates_correctly() {
+        static S_BOUNDS: &[f64] = &[10.0, 100.0];
+        let h = Histogram::new("sum_check", "", S_BOUNDS);
+        h.observe(1.0);
+        h.observe(2.0);
+        h.observe(3.0);
+        assert!((h.sum() - 6.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn histogram_name_help_bounds() {
+        let h = Histogram::new("req_latency", "latency in seconds", BOUNDS);
+        assert_eq!(h.name(), "req_latency");
+        assert_eq!(h.help(), "latency in seconds");
+        assert_eq!(h.bounds(), BOUNDS);
+    }
+
+    #[test]
+    fn histogram_debug_format() {
+        let h = Histogram::new("dbg_hist", "debug histogram", BOUNDS);
+        h.observe(0.1);
+        let s = format!("{h:?}");
+        assert!(s.contains("Histogram"));
+        assert!(s.contains("dbg_hist"));
+    }
+
+    #[test]
+    fn histogram_single_bucket() {
+        static ONE_BOUND: &[f64] = &[1.0];
+        let h = Histogram::new("single_bucket", "", ONE_BOUND);
+        h.observe(0.5);
+        h.observe(1.5);
+        let snap = h.snapshot();
+        assert_eq!(snap.len(), 2); // le=1.0 and +Inf
+        assert_eq!(snap[0].1, 1); // le=1.0: 0.5 fits
+        assert_eq!(snap[1].1, 2); // +Inf: both
+    }
 }

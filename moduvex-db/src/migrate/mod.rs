@@ -149,4 +149,50 @@ mod tests {
         let engine = MigrationEngine::new("migrations/");
         assert_eq!(engine.migrations_dir, PathBuf::from("migrations/"));
     }
+
+    // ── Additional migrate mod tests ───────────────────────────────────────────
+
+    #[test]
+    fn migration_report_zero_counts() {
+        let r = MigrationReport {
+            total: 0,
+            applied: 0,
+            skipped: 0,
+        };
+        let s = r.to_string();
+        assert!(s.contains("0 total"));
+    }
+
+    #[test]
+    fn migration_report_all_skipped() {
+        let r = MigrationReport {
+            total: 10,
+            applied: 0,
+            skipped: 10,
+        };
+        let s = r.to_string();
+        assert!(s.contains("10 total"));
+        assert!(s.contains("10 skipped"));
+        assert!(s.contains("0 applied"));
+    }
+
+    #[test]
+    fn migration_report_clone() {
+        let r = MigrationReport {
+            total: 3,
+            applied: 1,
+            skipped: 2,
+        };
+        let r2 = r.clone();
+        assert_eq!(r.total, r2.total);
+        assert_eq!(r.applied, r2.applied);
+        assert_eq!(r.skipped, r2.skipped);
+    }
+
+    #[test]
+    fn engine_new_accepts_pathbuf() {
+        let path = PathBuf::from("/tmp/migrations");
+        let engine = MigrationEngine::new(path.clone());
+        assert_eq!(engine.migrations_dir, path);
+    }
 }

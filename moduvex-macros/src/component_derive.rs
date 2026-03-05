@@ -71,9 +71,11 @@ pub fn expand(input: TokenStream) -> darling::Result<TokenStream> {
 
         if has_inject {
             if field_opts.optional {
-                // Optional injection: try to get, return None if missing
+                // Optional injection: try to get, return None if missing.
+                // The field type is Option<T>; we look up T in the context.
+                // ctx.get::<T>() returns Option<Arc<T>>, map clones to Option<T>.
                 field_inits.push(quote! {
-                    #field_name: ctx.get::<#field_ty>().map(|arc| (*arc).clone()).ok()
+                    #field_name: ctx.get::<#field_ty>().map(|arc| (*arc).clone())
                 });
             } else {
                 // Required injection: fail if missing

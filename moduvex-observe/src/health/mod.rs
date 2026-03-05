@@ -215,4 +215,103 @@ mod tests {
         assert_eq!(results[0].name, "always_healthy");
         assert!(results[0].status.is_healthy());
     }
+
+    #[test]
+    fn empty_registry_aggregate_is_healthy() {
+        let reg = HealthRegistry::new();
+        assert_eq!(reg.aggregate(), HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn empty_registry_check_all_returns_empty() {
+        let reg = HealthRegistry::new();
+        let results = reg.check_all();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn health_status_is_healthy_only_for_healthy_variant() {
+        assert!(HealthStatus::Healthy.is_healthy());
+        assert!(!HealthStatus::Degraded("x".into()).is_healthy());
+        assert!(!HealthStatus::Unhealthy("x".into()).is_healthy());
+    }
+
+    #[test]
+    fn health_status_display_healthy() {
+        assert_eq!(HealthStatus::Healthy.to_string(), "healthy");
+    }
+
+    #[test]
+    fn health_status_display_degraded() {
+        let s = HealthStatus::Degraded("disk full".into()).to_string();
+        assert_eq!(s, "degraded: disk full");
+    }
+
+    #[test]
+    fn health_status_display_unhealthy() {
+        let s = HealthStatus::Unhealthy("timeout".into()).to_string();
+        assert_eq!(s, "unhealthy: timeout");
+    }
+
+    #[test]
+    fn aggregate_unhealthy_message_includes_check_name() {
+        let reg = HealthRegistry::new();
+        reg.register(AlwaysUnhealthy);
+        match reg.aggregate() {
+            HealthStatus::Unhealthy(msg) => assert!(msg.contains("always_unhealthy")),
+            _ => panic!("expected unhealthy"),
+        }
+    }
+
+    #[test]
+    fn aggregate_degraded_message_includes_check_name() {
+        let reg = HealthRegistry::new();
+        reg.register(DegradedCheck);
+        match reg.aggregate() {
+            HealthStatus::Degraded(msg) => assert!(msg.contains("degraded")),
+            _ => panic!("expected degraded"),
+        }
+    }
+
+    #[test]
+    fn unhealthy_takes_priority_over_degraded() {
+        let reg = HealthRegistry::new();
+        reg.register(DegradedCheck);
+        reg.register(AlwaysUnhealthy);
+        assert!(matches!(reg.aggregate(), HealthStatus::Unhealthy(_)));
+    }
+
+    #[test]
+    fn check_result_name_matches_registered_check() {
+        let reg = HealthRegistry::new();
+        reg.register(AlwaysHealthy);
+        let results = reg.check_all();
+        assert_eq!(results[0].name, "always_healthy");
+    }
+
+    #[test]
+    fn health_status_equality() {
+        assert_eq!(HealthStatus::Healthy, HealthStatus::Healthy);
+        assert_ne!(HealthStatus::Healthy, HealthStatus::Degraded("x".into()));
+        assert_eq!(
+            HealthStatus::Unhealthy("err".into()),
+            HealthStatus::Unhealthy("err".into())
+        );
+    }
+
+    #[test]
+    fn registry_default_equals_new() {
+        let reg = HealthRegistry::default();
+        assert!(reg.check_all().is_empty());
+    }
+
+    #[test]
+    fn multiple_checks_all_healthy() {
+        let reg = HealthRegistry::new();
+        reg.register(AlwaysHealthy);
+        reg.register(AlwaysHealthy);
+        reg.register(AlwaysHealthy);
+        assert_eq!(reg.aggregate(), HealthStatus::Healthy);
+        assert_eq!(reg.check_all().len(), 3);
+    }
 }

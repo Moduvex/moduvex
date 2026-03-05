@@ -52,4 +52,40 @@ mod tests {
         let event = Event::now(Level::Info, "test event").field("key", "value");
         exporter.on_event(&event);
     }
+
+    #[test]
+    fn stdout_exporter_pretty_does_not_panic() {
+        let exporter = StdoutExporter::pretty();
+        let event = Event::now(Level::Warn, "pretty test").field("x", 42_i32);
+        exporter.on_event(&event);
+    }
+
+    #[test]
+    fn stdout_format_variants_are_distinct() {
+        assert_ne!(StdoutFormat::Pretty, StdoutFormat::Json);
+        assert_eq!(StdoutFormat::Json, StdoutFormat::Json);
+    }
+
+    #[test]
+    fn stdout_exporter_new_pretty() {
+        let exporter = StdoutExporter::new(StdoutFormat::Pretty);
+        let event = Event::now(Level::Debug, "new pretty");
+        exporter.on_event(&event);
+    }
+
+    #[test]
+    fn stdout_exporter_new_json() {
+        let exporter = StdoutExporter::new(StdoutFormat::Json);
+        let event = Event::now(Level::Error, "new json");
+        exporter.on_event(&event);
+    }
+
+    #[test]
+    fn stdout_exporter_all_log_levels() {
+        let exporter = StdoutExporter::json();
+        for &level in &[Level::Trace, Level::Debug, Level::Info, Level::Warn, Level::Error] {
+            let event = Event::now(level, "level sweep");
+            exporter.on_event(&event); // must not panic
+        }
+    }
 }

@@ -455,4 +455,241 @@ mod tests {
             elapsed
         );
     }
+
+    // ── Additional timer wheel tests ───────────────────────────────────────
+
+    #[test]
+    fn wheel_cancel_nonexistent_returns_false() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let fake_id = TimerId(9999);
+        assert!(!w.cancel(fake_id));
+    }
+
+    #[test]
+    fn wheel_cancel_already_fired_returns_false() {
+        let flag = Arc::new(Mutex::new(false));
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let waker = make_flag_waker(Arc::clone(&flag));
+        let id = w.insert(origin + Duration::from_millis(5), waker);
+        let _ = w.tick(origin + Duration::from_millis(10)); // fires it
+        assert!(!w.cancel(id)); // already gone from index
+    }
+
+    #[test]
+    fn wheel_tick_backwards_is_noop() {
+        let flag = Arc::new(Mutex::new(false));
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let waker = make_flag_waker(Arc::clone(&flag));
+        w.insert(origin + Duration::from_millis(50), waker);
+        let _ = w.tick(origin + Duration::from_millis(100)); // advance past
+        // Now tick backwards — must not panic or double-fire
+        let wakers = w.tick(origin + Duration::from_millis(10));
+        assert!(wakers.is_empty());
+    }
+
+    #[test]
+    fn wheel_multiple_timers_same_slot() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        for _ in 0..5 {
+            let flag = Arc::new(Mutex::new(false));
+            let waker = make_flag_waker(Arc::clone(&flag));
+            w.insert(origin + Duration::from_millis(10), waker);
+        }
+        let wakers = w.tick(origin + Duration::from_millis(20));
+        assert_eq!(wakers.len(), 5);
+    }
+
+    #[test]
+    fn wheel_1000_timers_all_fire() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        for i in 0..1000u64 {
+            let flag = Arc::new(Mutex::new(false));
+            let waker = make_flag_waker(Arc::clone(&flag));
+            w.insert(origin + Duration::from_millis(i % 100), waker);
+        }
+        let wakers = w.tick(origin + Duration::from_millis(200));
+        assert_eq!(wakers.len(), 1000);
+    }
+
+    #[test]
+    fn wheel_next_deadline_empty_returns_none() {
+        let origin = Instant::now();
+        let w = TimerWheel::new(origin);
+        assert!(w.next_deadline().is_none());
+    }
+
+    #[test]
+    fn wheel_next_deadline_after_cancel_updates() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let f1 = Arc::new(Mutex::new(false));
+        let f2 = Arc::new(Mutex::new(false));
+        let d1 = origin + Duration::from_millis(100);
+        let d2 = origin + Duration::from_millis(200);
+        let id1 = w.insert(d1, make_flag_waker(Arc::clone(&f1)));
+        let _id2 = w.insert(d2, make_flag_waker(Arc::clone(&f2)));
+        assert_eq!(w.next_deadline().unwrap(), d1);
+        w.cancel(id1);
+        assert_eq!(w.next_deadline().unwrap(), d2);
+    }
+
+    #[test]
+    fn wheel_partial_tick_does_not_fire_future_timers() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let flag = Arc::new(Mutex::new(false));
+        w.insert(
+            origin + Duration::from_millis(100),
+            make_flag_waker(Arc::clone(&flag)),
+        );
+        let wakers = w.tick(origin + Duration::from_millis(50));
+        assert!(wakers.is_empty());
+        assert!(!*flag.lock().unwrap());
+    }
+
+    #[test]
+    fn wheel_level_boundary_cascades_correctly() {
+        // A timer at 65ms should cascade from level 1 to level 0 during tick.
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let flag = Arc::new(Mutex::new(false));
+        w.insert(
+            origin + Duration::from_millis(65),
+            make_flag_waker(Arc::clone(&flag)),
+        );
+        let wakers = w.tick(origin + Duration::from_millis(70));
+        assert_eq!(wakers.len(), 1);
+    }
+
+    #[test]
+    fn wheel_insert_past_deadline_fires_on_first_tick() {
+        // Insert a timer with deadline in the past — should fire on next tick.
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let flag = Arc::new(Mutex::new(false));
+        let past_deadline = origin; // zero deadline
+        w.insert(past_deadline, make_flag_waker(Arc::clone(&flag)));
+        let wakers = w.tick(origin + Duration::from_millis(1));
+        assert!(!wakers.is_empty());
+    }
+
+    #[test]
+    fn wheel_two_timers_different_deadlines_only_earlier_fires() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let f1 = Arc::new(Mutex::new(false));
+        let f2 = Arc::new(Mutex::new(false));
+        w.insert(
+            origin + Duration::from_millis(10),
+            make_flag_waker(Arc::clone(&f1)),
+        );
+        w.insert(
+            origin + Duration::from_millis(50),
+            make_flag_waker(Arc::clone(&f2)),
+        );
+        let wakers = w.tick(origin + Duration::from_millis(20));
+        // Only the 10ms timer should fire
+        assert_eq!(wakers.len(), 1);
+        assert!(!*f2.lock().unwrap());
+    }
+
+    #[test]
+    fn wheel_cancel_all_removes_from_index() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let mut ids = Vec::new();
+        for i in 1..=5u64 {
+            let flag = Arc::new(Mutex::new(false));
+            let id = w.insert(origin + Duration::from_millis(i * 10), make_flag_waker(flag));
+            ids.push(id);
+        }
+        // Cancel all
+        for id in ids {
+            assert!(w.cancel(id));
+        }
+        // No wakers should fire
+        let wakers = w.tick(origin + Duration::from_millis(100));
+        assert!(wakers.is_empty());
+    }
+
+    #[test]
+    fn wheel_many_deadlines_at_different_levels() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        // Level 0: 1ms
+        let f1 = Arc::new(Mutex::new(false));
+        w.insert(origin + Duration::from_millis(1), make_flag_waker(Arc::clone(&f1)));
+        // Level 1: 100ms
+        let f2 = Arc::new(Mutex::new(false));
+        w.insert(origin + Duration::from_millis(100), make_flag_waker(Arc::clone(&f2)));
+        // Level 2: 5000ms (5s)
+        let f3 = Arc::new(Mutex::new(false));
+        w.insert(origin + Duration::from_millis(5000), make_flag_waker(Arc::clone(&f3)));
+
+        // Tick to 200ms: first 2 should fire
+        let wakers = w.tick(origin + Duration::from_millis(200));
+        assert_eq!(wakers.len(), 2);
+        // f3 should not have fired yet
+        assert!(!*f3.lock().unwrap());
+
+        // Tick to 6000ms: f3 should fire
+        let wakers2 = w.tick(origin + Duration::from_millis(6000));
+        assert_eq!(wakers2.len(), 1);
+    }
+
+    #[test]
+    fn wheel_empty_tick_returns_empty_vec() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        // No timers inserted — tick should always return empty
+        let wakers = w.tick(origin + Duration::from_millis(1000));
+        assert!(wakers.is_empty());
+    }
+
+    #[test]
+    fn wheel_same_tick_twice_second_empty() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let flag = Arc::new(Mutex::new(false));
+        w.insert(origin + Duration::from_millis(10), make_flag_waker(Arc::clone(&flag)));
+        let wakers1 = w.tick(origin + Duration::from_millis(20));
+        assert_eq!(wakers1.len(), 1);
+        // Same tick again — timer already fired
+        let wakers2 = w.tick(origin + Duration::from_millis(20));
+        assert!(wakers2.is_empty());
+    }
+
+    #[test]
+    fn wheel_timer_id_uniqueness() {
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        let mut ids = std::collections::HashSet::new();
+        for i in 0..10u64 {
+            let flag = Arc::new(Mutex::new(false));
+            let id = w.insert(origin + Duration::from_millis(i * 5 + 1), make_flag_waker(flag));
+            // Each TimerId must be unique
+            assert!(ids.insert(id));
+        }
+    }
+
+    #[test]
+    fn wheel_tick_advances_last_tick_ms() {
+        // After ticking, the wheel should correctly handle subsequent ticks
+        let origin = Instant::now();
+        let mut w = TimerWheel::new(origin);
+        // Insert at 200ms
+        let flag = Arc::new(Mutex::new(false));
+        w.insert(origin + Duration::from_millis(200), make_flag_waker(Arc::clone(&flag)));
+        // Partial tick to 100ms — should not fire
+        let wakers1 = w.tick(origin + Duration::from_millis(100));
+        assert!(wakers1.is_empty());
+        // Full tick to 250ms — should fire
+        let wakers2 = w.tick(origin + Duration::from_millis(250));
+        assert_eq!(wakers2.len(), 1);
+    }
 }

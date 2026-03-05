@@ -255,4 +255,211 @@ mod tests {
         );
         assert_eq!(local.len(), stolen);
     }
+
+    // ── Additional scheduler tests ─────────────────────────────────────────
+
+    #[test]
+    fn local_queue_empty_on_new() {
+        let q = LocalQueue::new();
+        assert!(q.is_empty());
+        assert_eq!(q.len(), 0);
+    }
+
+    #[test]
+    fn local_queue_pop_empty_returns_none() {
+        let mut q = LocalQueue::new();
+        assert!(q.pop().is_none());
+    }
+
+    #[test]
+    fn local_queue_len_increments_on_push() {
+        let mut q = LocalQueue::new();
+        for i in 0..5 {
+            assert_eq!(q.len(), i);
+            assert!(q.push(make_header()).is_none());
+            assert_eq!(q.len(), i + 1);
+        }
+    }
+
+    #[test]
+    fn local_queue_drain_front_empty_is_noop() {
+        let mut q = LocalQueue::new();
+        let mut dest = Vec::new();
+        q.drain_front(&mut dest, 10);
+        assert!(dest.is_empty());
+    }
+
+    #[test]
+    fn local_queue_drain_front_more_than_len_drains_all() {
+        let mut q = LocalQueue::new();
+        for _ in 0..3 {
+            q.push(make_header());
+        }
+        let mut dest = Vec::new();
+        q.drain_front(&mut dest, 100);
+        assert_eq!(dest.len(), 3);
+        assert_eq!(q.len(), 0);
+    }
+
+    #[test]
+    fn global_queue_empty_pop_returns_none() {
+        let gq = GlobalQueue::new();
+        assert!(gq.pop().is_none());
+    }
+
+    #[test]
+    fn global_queue_len_tracks_count() {
+        let gq = GlobalQueue::new();
+        assert_eq!(gq.len(), 0);
+        gq.push_header(make_header());
+        assert_eq!(gq.len(), 1);
+        gq.push_header(make_header());
+        assert_eq!(gq.len(), 2);
+        let _ = gq.pop();
+        assert_eq!(gq.len(), 1);
+    }
+
+    #[test]
+    fn global_queue_fifo_ordering() {
+        let gq = GlobalQueue::new();
+        let h1 = make_header();
+        let h2 = make_header();
+        let p1 = Arc::as_ptr(&h1);
+        let p2 = Arc::as_ptr(&h2);
+        gq.push_header(h1);
+        gq.push_header(h2);
+        // FIFO: first in, first out
+        assert_eq!(Arc::as_ptr(&gq.pop().unwrap()), p1);
+        assert_eq!(Arc::as_ptr(&gq.pop().unwrap()), p2);
+    }
+
+    #[test]
+    fn global_queue_steal_batch_single_item_returns_one() {
+        let gq = GlobalQueue::new();
+        gq.push_header(make_header());
+        let mut local = LocalQueue::new();
+        let stolen = gq.steal_batch(&mut local);
+        assert_eq!(stolen, 1);
+        assert_eq!(gq.len(), 0);
+    }
+
+    #[test]
+    fn global_queue_steal_batch_empty_returns_zero() {
+        let gq = GlobalQueue::new();
+        let mut local = LocalQueue::new();
+        let stolen = gq.steal_batch(&mut local);
+        assert_eq!(stolen, 0);
+    }
+
+    #[test]
+    fn local_queue_push_many_pop_all() {
+        let mut q = LocalQueue::new();
+        for _ in 0..10 {
+            q.push(make_header());
+        }
+        assert_eq!(q.len(), 10);
+        let mut count = 0;
+        while q.pop().is_some() {
+            count += 1;
+        }
+        assert_eq!(count, 10);
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn global_queue_push_many_pop_in_fifo_order() {
+        let gq = GlobalQueue::new();
+        let mut ptrs = Vec::new();
+        for _ in 0..5 {
+            let h = make_header();
+            ptrs.push(Arc::as_ptr(&h));
+            gq.push_header(h);
+        }
+        for ptr in ptrs {
+            let popped = gq.pop().unwrap();
+            assert_eq!(Arc::as_ptr(&popped), ptr);
+        }
+        assert!(gq.pop().is_none());
+    }
+
+    #[test]
+    fn local_queue_interleaved_push_pop() {
+        let mut q = LocalQueue::new();
+        q.push(make_header());
+        q.push(make_header());
+        q.pop();
+        assert_eq!(q.len(), 1);
+        q.push(make_header());
+        q.push(make_header());
+        assert_eq!(q.len(), 3);
+    }
+
+    #[test]
+    fn global_queue_steal_batch_10_items_steals_at_least_1() {
+        let gq = GlobalQueue::new();
+        for _ in 0..10 {
+            gq.push_header(make_header());
+        }
+        let mut local = LocalQueue::new();
+        let stolen = gq.steal_batch(&mut local);
+        assert!(stolen >= 1);
+        assert!(stolen <= 5); // at most half
+    }
+
+    #[test]
+    fn local_queue_is_not_empty_after_push() {
+        let mut q = LocalQueue::new();
+        assert!(q.is_empty());
+        q.push(make_header());
+        assert!(!q.is_empty());
+    }
+
+    #[test]
+    fn local_queue_push_then_pop_lifo_2_items() {
+        let mut q = LocalQueue::new();
+        let h1 = make_header();
+        let h2 = make_header();
+        let p1 = Arc::as_ptr(&h1);
+        let p2 = Arc::as_ptr(&h2);
+        q.push(h1);
+        q.push(h2);
+        // LIFO: second pushed is popped first
+        assert_eq!(Arc::as_ptr(&q.pop().unwrap()), p2);
+        assert_eq!(Arc::as_ptr(&q.pop().unwrap()), p1);
+    }
+
+    #[test]
+    fn global_queue_multiple_push_pop_cycles() {
+        let gq = GlobalQueue::new();
+        for _ in 0..3 {
+            gq.push_header(make_header());
+            gq.push_header(make_header());
+            gq.pop();
+        }
+        assert_eq!(gq.len(), 3);
+    }
+
+    #[test]
+    fn local_queue_drain_front_partial() {
+        let mut q = LocalQueue::new();
+        for _ in 0..10 {
+            q.push(make_header());
+        }
+        let mut dest = Vec::new();
+        q.drain_front(&mut dest, 4);
+        assert_eq!(dest.len(), 4);
+        assert_eq!(q.len(), 6);
+    }
+
+    #[test]
+    fn global_queue_steal_batch_large_queue() {
+        let gq = GlobalQueue::new();
+        for _ in 0..100 {
+            gq.push_header(make_header());
+        }
+        let mut local = LocalQueue::new();
+        let stolen = gq.steal_batch(&mut local);
+        assert!(stolen >= 1);
+        assert!(stolen <= 50);
+    }
 }

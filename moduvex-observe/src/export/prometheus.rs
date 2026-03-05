@@ -141,4 +141,133 @@ mod tests {
         assert!(s.contains("latency_sum 3.5"));
         assert!(s.contains("latency_count 10"));
     }
+
+    #[test]
+    fn render_gauge() {
+        let metrics = vec![(
+            "active_connections",
+            "Current active connections",
+            MetricKind::Gauge,
+            MetricSnapshot::Gauge(17),
+        )];
+        let mut buf = Vec::new();
+        PrometheusExporter::render(&metrics, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("# HELP active_connections Current active connections"));
+        assert!(s.contains("# TYPE active_connections gauge"));
+        assert!(s.contains("active_connections 17"));
+    }
+
+    #[test]
+    fn render_gauge_negative_value() {
+        let metrics = vec![(
+            "temperature_celsius",
+            "Temperature in celsius",
+            MetricKind::Gauge,
+            MetricSnapshot::Gauge(-40),
+        )];
+        let s = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert!(s.contains("temperature_celsius -40"));
+    }
+
+    #[test]
+    fn render_counter_zero_value() {
+        let metrics = vec![(
+            "errors_total",
+            "Total errors",
+            MetricKind::Counter,
+            MetricSnapshot::Counter(0),
+        )];
+        let s = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert!(s.contains("errors_total 0"));
+    }
+
+    #[test]
+    fn render_multiple_metrics_produces_all() {
+        let metrics = vec![
+            (
+                "req_total",
+                "requests",
+                MetricKind::Counter,
+                MetricSnapshot::Counter(100),
+            ),
+            (
+                "mem_bytes",
+                "memory",
+                MetricKind::Gauge,
+                MetricSnapshot::Gauge(1024),
+            ),
+        ];
+        let s = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert!(s.contains("req_total 100"));
+        assert!(s.contains("mem_bytes 1024"));
+        // Both TYPE lines present
+        assert!(s.contains("# TYPE req_total counter"));
+        assert!(s.contains("# TYPE mem_bytes gauge"));
+    }
+
+    #[test]
+    fn render_empty_metrics_produces_empty_output() {
+        let metrics: Vec<(&str, &str, MetricKind, MetricSnapshot)> = vec![];
+        let s = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn render_histogram_type_line() {
+        let metrics = vec![(
+            "latency_seconds",
+            "Latency",
+            MetricKind::Histogram,
+            MetricSnapshot::Histogram {
+                buckets: vec![(f64::INFINITY, 5)],
+                count: 5,
+                sum: 2.5,
+            },
+        )];
+        let s = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert!(s.contains("# TYPE latency_seconds histogram"));
+    }
+
+    #[test]
+    fn render_to_vec_produces_same_as_render_to_string() {
+        let metrics = vec![(
+            "test_metric",
+            "test",
+            MetricKind::Counter,
+            MetricSnapshot::Counter(3),
+        )];
+        let vec_output = PrometheusExporter::render_to_vec(&metrics).unwrap();
+        let str_output = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert_eq!(vec_output, str_output.as_bytes());
+    }
+
+    #[test]
+    fn render_histogram_empty_buckets_still_has_sum_and_count() {
+        let metrics = vec![(
+            "hist_no_buckets",
+            "no bucket boundaries",
+            MetricKind::Histogram,
+            MetricSnapshot::Histogram {
+                buckets: vec![(f64::INFINITY, 0)],
+                count: 0,
+                sum: 0.0,
+            },
+        )];
+        let s = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert!(s.contains("hist_no_buckets_sum 0"));
+        assert!(s.contains("hist_no_buckets_count 0"));
+    }
+
+    #[test]
+    fn render_large_counter_value() {
+        let metrics = vec![(
+            "huge_total",
+            "big number",
+            MetricKind::Counter,
+            MetricSnapshot::Counter(u64::MAX),
+        )];
+        let s = PrometheusExporter::render_to_string(&metrics).unwrap();
+        assert!(s.contains(&u64::MAX.to_string()));
+    }
 }

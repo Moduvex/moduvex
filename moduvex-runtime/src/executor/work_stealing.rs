@@ -197,4 +197,207 @@ mod tests {
         }
         assert_eq!(sq.len(), 1);
     }
+
+    // ── Additional work-stealing tests ────────────────────────────────────
+
+    #[test]
+    fn steal_from_single_item_queue_returns_zero() {
+        // Half of 1 = 0 (integer division) — returns 0 stolen
+        let src = StealableQueue::new();
+        src.local_mut().push(make_header());
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        let stolen = src.steal_from(&mut dest, &gq);
+        assert_eq!(stolen, 0, "can't steal half of 1 task");
+    }
+
+    #[test]
+    fn stealable_queue_is_empty_and_len() {
+        let sq = StealableQueue::new();
+        assert!(sq.is_empty());
+        assert_eq!(sq.len(), 0);
+        sq.local_mut().push(make_header());
+        assert!(!sq.is_empty());
+        assert_eq!(sq.len(), 1);
+    }
+
+    #[test]
+    fn pool_worker_count() {
+        let mut pool = WorkStealingPool::new();
+        assert_eq!(pool.worker_count(), 0);
+        pool.add_worker(Arc::new(StealableQueue::new()));
+        assert_eq!(pool.worker_count(), 1);
+        pool.add_worker(Arc::new(StealableQueue::new()));
+        assert_eq!(pool.worker_count(), 2);
+    }
+
+    #[test]
+    fn pool_all_empty_returns_zero() {
+        let mut pool = WorkStealingPool::new();
+        pool.add_worker(Arc::new(StealableQueue::new()));
+        pool.add_worker(Arc::new(StealableQueue::new()));
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        assert_eq!(pool.steal_one(0, &mut dest, &gq), 0);
+    }
+
+    #[test]
+    fn steal_many_items_distributes_half() {
+        let src = StealableQueue::new();
+        {
+            let mut local = src.local_mut();
+            for _ in 0..20 {
+                local.push(make_header());
+            }
+        }
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        let stolen = src.steal_from(&mut dest, &gq);
+        assert_eq!(stolen, 10);
+        assert_eq!(src.len(), 10);
+    }
+
+    #[test]
+    fn pool_steal_only_from_non_empty_worker() {
+        let q0 = Arc::new(StealableQueue::new()); // empty
+        let q1 = Arc::new(StealableQueue::new()); // empty
+        let q2 = Arc::new(StealableQueue::new()); // has tasks
+        for _ in 0..4 {
+            q2.local_mut().push(make_header());
+        }
+        let mut pool = WorkStealingPool::new();
+        pool.add_worker(Arc::clone(&q0));
+        pool.add_worker(Arc::clone(&q1));
+        pool.add_worker(Arc::clone(&q2));
+
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        // Worker 0 steals; q1 is empty so steals from q2
+        let n = pool.steal_one(0, &mut dest, &gq);
+        assert!(n >= 1, "should steal from q2");
+        assert_eq!(q0.len(), 0);
+        assert_eq!(q1.len(), 0);
+    }
+
+    #[test]
+    fn steal_from_2_items_steals_1() {
+        let src = StealableQueue::new();
+        src.local_mut().push(make_header());
+        src.local_mut().push(make_header());
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        let stolen = src.steal_from(&mut dest, &gq);
+        assert_eq!(stolen, 1);
+        assert_eq!(src.len(), 1);
+    }
+
+    #[test]
+    fn stealable_queue_len_after_pop() {
+        let sq = StealableQueue::new();
+        sq.local_mut().push(make_header());
+        sq.local_mut().push(make_header());
+        assert_eq!(sq.len(), 2);
+        sq.local_mut().pop();
+        assert_eq!(sq.len(), 1);
+        sq.local_mut().pop();
+        assert_eq!(sq.len(), 0);
+        assert!(sq.is_empty());
+    }
+
+    #[test]
+    fn pool_new_has_zero_workers() {
+        let pool = WorkStealingPool::new();
+        assert_eq!(pool.worker_count(), 0);
+    }
+
+    #[test]
+    fn pool_steal_one_no_workers_returns_zero() {
+        let pool = WorkStealingPool::new();
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        // No workers at all
+        assert_eq!(pool.steal_one(0, &mut dest, &gq), 0);
+    }
+
+    #[test]
+    fn pool_steal_skips_self_when_self_has_work() {
+        let q0 = Arc::new(StealableQueue::new()); // has work — but is self
+        let q1 = Arc::new(StealableQueue::new()); // empty
+        for _ in 0..8 {
+            q0.local_mut().push(make_header());
+        }
+        let mut pool = WorkStealingPool::new();
+        pool.add_worker(Arc::clone(&q0));
+        pool.add_worker(Arc::clone(&q1));
+
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        // Worker 0 tries to steal but only q1 (empty) is eligible
+        let n = pool.steal_one(0, &mut dest, &gq);
+        assert_eq!(n, 0, "q1 is empty; should not steal from self");
+        assert_eq!(q0.len(), 8, "q0 unchanged");
+    }
+
+    #[test]
+    fn steal_from_6_items_steals_3() {
+        let src = StealableQueue::new();
+        for _ in 0..6 {
+            src.local_mut().push(make_header());
+        }
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        let stolen = src.steal_from(&mut dest, &gq);
+        assert_eq!(stolen, 3);
+        assert_eq!(src.len(), 3);
+    }
+
+    #[test]
+    fn pool_steal_one_worker_2_non_self_returns_from_second() {
+        let q0 = Arc::new(StealableQueue::new());
+        let q1 = Arc::new(StealableQueue::new());
+        // Give q1 some work
+        for _ in 0..4 {
+            q1.local_mut().push(make_header());
+        }
+        let mut pool = WorkStealingPool::new();
+        pool.add_worker(Arc::clone(&q0));
+        pool.add_worker(Arc::clone(&q1));
+
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        let n = pool.steal_one(0, &mut dest, &gq);
+        assert_eq!(n, 2, "should steal 2 from q1 (half of 4)");
+        assert_eq!(q1.len(), 2);
+    }
+
+    #[test]
+    fn stealable_queue_push_16_items() {
+        let sq = StealableQueue::new();
+        for _ in 0..16 {
+            sq.local_mut().push(make_header());
+        }
+        assert_eq!(sq.len(), 16);
+        assert!(!sq.is_empty());
+    }
+
+    #[test]
+    fn pool_3_workers_steal_from_last() {
+        let q0 = Arc::new(StealableQueue::new());
+        let q1 = Arc::new(StealableQueue::new());
+        let q2 = Arc::new(StealableQueue::new());
+        for _ in 0..10 {
+            q2.local_mut().push(make_header());
+        }
+        let mut pool = WorkStealingPool::new();
+        pool.add_worker(Arc::clone(&q0));
+        pool.add_worker(Arc::clone(&q1));
+        pool.add_worker(Arc::clone(&q2));
+
+        let mut dest = LocalQueue::new();
+        let gq = Arc::new(GlobalQueue::new());
+        let n = pool.steal_one(0, &mut dest, &gq);
+        // q0=empty(skip self), q1=empty, q2=10 items → steal 5
+        assert_eq!(n, 5);
+        assert_eq!(q2.len(), 5);
+    }
 }

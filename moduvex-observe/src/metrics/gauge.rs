@@ -82,4 +82,117 @@ mod tests {
         g.add(-10);
         assert_eq!(g.get(), 32);
     }
+
+    #[test]
+    fn gauge_starts_at_zero() {
+        let g = Gauge::new("fresh_gauge", "starts at zero");
+        assert_eq!(g.get(), 0);
+    }
+
+    #[test]
+    fn gauge_set_negative() {
+        let g = Gauge::new("temperature", "celsius reading");
+        g.set(-273);
+        assert_eq!(g.get(), -273);
+    }
+
+    #[test]
+    fn gauge_add_negative_values() {
+        let g = Gauge::new("delta", "");
+        g.set(100);
+        g.add(-150);
+        assert_eq!(g.get(), -50);
+    }
+
+    #[test]
+    fn gauge_dec_below_zero() {
+        let g = Gauge::new("below_zero", "");
+        g.dec();
+        assert_eq!(g.get(), -1);
+        g.dec();
+        assert_eq!(g.get(), -2);
+    }
+
+    #[test]
+    fn gauge_set_to_i64_min_max() {
+        let g = Gauge::new("extremes", "");
+        g.set(i64::MAX);
+        assert_eq!(g.get(), i64::MAX);
+        g.set(i64::MIN);
+        assert_eq!(g.get(), i64::MIN);
+    }
+
+    #[test]
+    fn gauge_name_and_help() {
+        let g = Gauge::new("queue_depth", "current queue length");
+        assert_eq!(g.name(), "queue_depth");
+        assert_eq!(g.help(), "current queue length");
+    }
+
+    #[test]
+    fn gauge_debug_format() {
+        let g = Gauge::new("dbg_gauge", "debug");
+        g.set(99);
+        let s = format!("{g:?}");
+        assert!(s.contains("Gauge"));
+        assert!(s.contains("dbg_gauge"));
+        assert!(s.contains("99"));
+    }
+
+    #[test]
+    fn gauge_concurrent_increments() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let g = Arc::new(Gauge::new("conc_gauge", ""));
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let g = Arc::clone(&g);
+                thread::spawn(move || {
+                    for _ in 0..1000 {
+                        g.inc();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(g.get(), 4000);
+    }
+
+    #[test]
+    fn gauge_concurrent_inc_dec() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let g = Arc::new(Gauge::new("net_gauge", ""));
+        // 2 threads inc, 2 threads dec — net should be 0
+        let handles: Vec<_> = (0..4)
+            .map(|i| {
+                let g = Arc::clone(&g);
+                thread::spawn(move || {
+                    for _ in 0..500 {
+                        if i % 2 == 0 {
+                            g.inc();
+                        } else {
+                            g.dec();
+                        }
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(g.get(), 0);
+    }
+
+    #[test]
+    fn gauge_add_zero_is_noop() {
+        let g = Gauge::new("noop_gauge", "");
+        g.set(55);
+        g.add(0);
+        assert_eq!(g.get(), 55);
+    }
 }

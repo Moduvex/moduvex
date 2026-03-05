@@ -448,4 +448,123 @@ mod tests {
             assert_eq!(&received, b"hello");
         });
     }
+
+    // ── Additional TCP stream tests ────────────────────────────────────────
+
+    #[test]
+    fn tcp_stream_connect_and_write_read() {
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let addr = listener.local_addr().unwrap();
+            let jh = crate::spawn(async move {
+                let mut client = TcpStream::connect(addr).await.unwrap();
+                write_all(&mut client, b"hello").await;
+            });
+            let (mut server, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 5];
+            read_exact(&mut server, &mut buf).await;
+            assert_eq!(&buf, b"hello");
+            jh.await.unwrap();
+        });
+    }
+
+    #[test]
+    fn tcp_stream_echo_roundtrip() {
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let addr = listener.local_addr().unwrap();
+            // Server echoes back
+            let jh = crate::spawn(async move {
+                let (mut conn, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4];
+                read_exact(&mut conn, &mut buf).await;
+                write_all(&mut conn, &buf).await;
+            });
+            let mut client = TcpStream::connect(addr).await.unwrap();
+            write_all(&mut client, b"ping").await;
+            let mut buf = [0u8; 4];
+            read_exact(&mut client, &mut buf).await;
+            assert_eq!(&buf, b"ping");
+            jh.await.unwrap();
+        });
+    }
+
+    #[test]
+    fn tcp_stream_connect_refused_returns_err() {
+        // Nothing listening on port 1 — connection should be refused.
+        let result = block_on_with_spawn(async {
+            TcpStream::connect("127.0.0.1:1".parse().unwrap()).await
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn tcp_stream_local_and_peer_addr() {
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let server_addr = listener.local_addr().unwrap();
+            let jh = crate::spawn(async move { listener.accept().await.unwrap() });
+            let client = TcpStream::connect(server_addr).await.unwrap();
+            assert_eq!(client.peer_addr().unwrap(), server_addr);
+            assert_eq!(client.local_addr().unwrap().ip().to_string(), "127.0.0.1");
+            drop(jh);
+        });
+    }
+
+    #[test]
+    fn tcp_stream_large_payload() {
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let addr = listener.local_addr().unwrap();
+            let payload_size = 4096usize;
+            let jh = crate::spawn(async move {
+                let mut client = TcpStream::connect(addr).await.unwrap();
+                let data = vec![0xABu8; payload_size];
+                write_all(&mut client, &data).await;
+            });
+            let (mut server, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; payload_size];
+            read_exact(&mut server, &mut buf).await;
+            assert!(buf.iter().all(|&b| b == 0xAB));
+            jh.await.unwrap();
+        });
+    }
+
+    #[test]
+    fn tcp_stream_multiple_connections_sequential() {
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let addr = listener.local_addr().unwrap();
+            for i in 0u8..3 {
+                let a = addr;
+                let jh = crate::spawn(async move {
+                    let mut client = TcpStream::connect(a).await.unwrap();
+                    write_all(&mut client, &[i]).await;
+                });
+                let (mut server, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 1];
+                read_exact(&mut server, &mut buf).await;
+                assert_eq!(buf[0], i);
+                jh.await.unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn tcp_stream_shutdown_write_half() {
+        use std::future::poll_fn;
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let addr = listener.local_addr().unwrap();
+            let jh = crate::spawn(async move {
+                let mut client = TcpStream::connect(addr).await.unwrap();
+                // Shutdown write half
+                poll_fn(|cx| Pin::new(&mut client).poll_shutdown(cx))
+                    .await
+                    .unwrap();
+            });
+            let (_server, _) = listener.accept().await.unwrap();
+            jh.await.unwrap();
+        });
+    }
 }

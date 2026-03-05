@@ -212,4 +212,61 @@ mod tests {
         let cfg = ShutdownConfig::default();
         assert_eq!(cfg.drain_timeout, Duration::from_secs(30));
     }
+
+    #[test]
+    fn shutdown_config_clone() {
+        let cfg = ShutdownConfig { drain_timeout: Duration::from_secs(10) };
+        let cfg2 = cfg.clone();
+        assert_eq!(cfg2.drain_timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn shutdown_config_debug_format() {
+        let cfg = ShutdownConfig::default();
+        let s = format!("{:?}", cfg);
+        assert!(s.contains("drain_timeout"));
+    }
+
+    #[test]
+    fn handle_default_creates_unset() {
+        let h = ShutdownHandle::default();
+        assert!(!h.is_requested());
+    }
+
+    #[test]
+    fn handle_multiple_clones_share_state() {
+        let h = ShutdownHandle::new();
+        let h2 = h.clone();
+        let h3 = h2.clone();
+        h.request();
+        assert!(h2.is_requested());
+        assert!(h3.is_requested());
+    }
+
+    #[test]
+    fn handle_request_is_idempotent() {
+        let h = ShutdownHandle::new();
+        h.request();
+        h.request(); // calling twice should not panic
+        assert!(h.is_requested());
+    }
+
+    #[test]
+    fn wait_for_shutdown_immediate_when_pre_requested() {
+        // Shutdown requested before wait_for_shutdown called — fast path
+        let h = ShutdownHandle::new();
+        h.request();
+        moduvex_runtime::block_on(async move {
+            wait_for_shutdown(&h).await;
+        });
+    }
+
+    #[test]
+    fn cloned_handle_can_trigger_shutdown() {
+        let h = ShutdownHandle::new();
+        let h2 = h.clone();
+        // Trigger via clone
+        h2.request();
+        assert!(h.is_requested());
+    }
 }

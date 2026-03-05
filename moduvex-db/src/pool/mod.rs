@@ -333,4 +333,66 @@ mod tests {
         assert_eq!(user, "alice");
         assert_eq!(pass, "p@ssw:rd");
     }
+
+    // ── Additional pool/URL tests ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_url_no_password() {
+        // URL without ':password' part
+        let (user, pass, hostport, db) =
+            parse_url("postgres://alice@127.0.0.1:5432/mydb").unwrap();
+        assert_eq!(user, "alice");
+        assert_eq!(pass, "");
+        assert_eq!(hostport, "127.0.0.1:5432");
+        assert_eq!(db, "mydb");
+    }
+
+    #[test]
+    fn parse_url_localhost_with_default_port() {
+        let (_, _, hostport, db) =
+            parse_url("postgres://user:pass@localhost:5432/testdb").unwrap();
+        assert_eq!(hostport, "localhost:5432");
+        assert_eq!(db, "testdb");
+    }
+
+    #[test]
+    fn parse_url_percent_encoded_at_sign_in_password() {
+        let (_, pass, _, _) =
+            parse_url("postgres://user:pass%40word@localhost:5432/db").unwrap();
+        assert_eq!(pass, "pass@word");
+    }
+
+    #[test]
+    fn parse_url_percent_encoded_colon_in_password() {
+        let (_, pass, _, _) =
+            parse_url("postgres://user:pass%3Aword@localhost:5432/db").unwrap();
+        assert_eq!(pass, "pass:word");
+    }
+
+    #[test]
+    fn pool_construction_does_not_panic() {
+        let cfg = PoolConfig::new("postgres://u:p@127.0.0.1:5432/db");
+        // Just verify construction succeeds
+        let pool = ConnectionPool::new(cfg);
+        assert!(Arc::strong_count(&pool) >= 1);
+    }
+
+    #[test]
+    fn pool_config_accessible_via_pool() {
+        let cfg = PoolConfig::new("postgres://u:p@127.0.0.1:5432/mydb")
+            .max_size(5);
+        let pool = ConnectionPool::new(cfg);
+        assert_eq!(pool.config().max_size, 5);
+        assert_eq!(pool.config().database_url, "postgres://u:p@127.0.0.1:5432/mydb");
+    }
+
+    #[test]
+    fn parse_url_empty_string_returns_error() {
+        assert!(parse_url("").is_err());
+    }
+
+    #[test]
+    fn parse_url_only_scheme_returns_error() {
+        assert!(parse_url("postgres://").is_err());
+    }
 }

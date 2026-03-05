@@ -657,4 +657,310 @@ mod tests {
             _ => panic!("expected ParameterDescription"),
         }
     }
+
+    // ── Auth variants ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn decode_auth_unknown_type_returns_error() {
+        let payload = 99i32.to_be_bytes().to_vec();
+        let result = decode_backend(MSG_AUTH, &payload);
+        assert!(matches!(result, Err(_)));
+    }
+
+    #[test]
+    fn decode_auth_payload_too_short_returns_error() {
+        let payload = vec![0u8; 2]; // need 4 bytes
+        let result = decode_backend(MSG_AUTH, &payload);
+        assert!(matches!(result, Err(_)));
+    }
+
+    #[test]
+    fn decode_auth_md5_missing_salt_returns_error() {
+        let payload = 5i32.to_be_bytes().to_vec(); // no salt bytes
+        let result = decode_backend(MSG_AUTH, &payload);
+        assert!(matches!(result, Err(_)));
+    }
+
+    // ── Row description ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn decode_row_description_single_column() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1u16.to_be_bytes()); // 1 column
+        write_cstring(&mut payload, "id");
+        // table_oid(4) + attr_num(2) + type_oid(4) + type_size(2) + type_mod(4) + fmt(2) = 18 bytes
+        payload.extend_from_slice(&0u32.to_be_bytes()); // table_oid
+        payload.extend_from_slice(&1u16.to_be_bytes()); // attr_num
+        payload.extend_from_slice(&23u32.to_be_bytes()); // int4 OID
+        payload.extend_from_slice(&4i16.to_be_bytes()); // type_size
+        payload.extend_from_slice(&(-1i32).to_be_bytes()); // type_modifier
+        payload.extend_from_slice(&0u16.to_be_bytes()); // format (text)
+
+        let msg = decode_backend(MSG_ROW_DESC, &payload).unwrap();
+        match msg {
+            BackendMessage::RowDescription(cols) => {
+                assert_eq!(cols.len(), 1);
+                assert_eq!(cols[0].name, "id");
+                assert_eq!(cols[0].type_oid, 23);
+            }
+            _ => panic!("expected RowDescription"),
+        }
+    }
+
+    #[test]
+    fn decode_row_description_multiple_columns() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u16.to_be_bytes()); // 2 columns
+        for name in ["id", "name"] {
+            write_cstring(&mut payload, name);
+            payload.extend_from_slice(&0u32.to_be_bytes()); // table_oid
+            payload.extend_from_slice(&0u16.to_be_bytes()); // attr_num
+            payload.extend_from_slice(&25u32.to_be_bytes()); // text OID
+            payload.extend_from_slice(&(-1i16).to_be_bytes()); // type_size
+            payload.extend_from_slice(&(-1i32).to_be_bytes()); // type_modifier
+            payload.extend_from_slice(&0u16.to_be_bytes()); // format
+        }
+        let msg = decode_backend(MSG_ROW_DESC, &payload).unwrap();
+        match msg {
+            BackendMessage::RowDescription(cols) => {
+                assert_eq!(cols.len(), 2);
+                assert_eq!(cols[0].name, "id");
+                assert_eq!(cols[1].name, "name");
+            }
+            _ => panic!("expected RowDescription"),
+        }
+    }
+
+    #[test]
+    fn decode_row_description_too_short_returns_error() {
+        let payload = vec![0u8; 1]; // needs at least 2 bytes for count
+        assert!(decode_backend(MSG_ROW_DESC, &payload).is_err());
+    }
+
+    // ── Data row ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn decode_data_row_zero_fields() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_be_bytes());
+        let msg = decode_backend(MSG_DATA_ROW, &payload).unwrap();
+        match msg {
+            BackendMessage::DataRow(fields) => assert!(fields.is_empty()),
+            _ => panic!("expected DataRow"),
+        }
+    }
+
+    #[test]
+    fn decode_data_row_all_nulls() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&3u16.to_be_bytes()); // 3 fields
+        for _ in 0..3 {
+            payload.extend_from_slice(&(-1i32).to_be_bytes()); // NULL
+        }
+        let msg = decode_backend(MSG_DATA_ROW, &payload).unwrap();
+        match msg {
+            BackendMessage::DataRow(fields) => {
+                assert_eq!(fields.len(), 3);
+                assert!(fields.iter().all(|f| f.is_none()));
+            }
+            _ => panic!("expected DataRow"),
+        }
+    }
+
+    #[test]
+    fn decode_data_row_multiple_fields() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u16.to_be_bytes());
+        payload.extend_from_slice(&3i32.to_be_bytes());
+        payload.extend_from_slice(b"foo");
+        payload.extend_from_slice(&3i32.to_be_bytes());
+        payload.extend_from_slice(b"bar");
+        let msg = decode_backend(MSG_DATA_ROW, &payload).unwrap();
+        match msg {
+            BackendMessage::DataRow(fields) => {
+                assert_eq!(fields[0], Some(b"foo".to_vec()));
+                assert_eq!(fields[1], Some(b"bar".to_vec()));
+            }
+            _ => panic!("expected DataRow"),
+        }
+    }
+
+    #[test]
+    fn decode_data_row_truncated_returns_error() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u16.to_be_bytes());
+        payload.extend_from_slice(&10i32.to_be_bytes()); // len=10 but no data
+        assert!(decode_backend(MSG_DATA_ROW, &payload).is_err());
+    }
+
+    // ── ReadyForQuery status variants ──────────────────────────────────────────
+
+    #[test]
+    fn decode_ready_for_query_transaction_status() {
+        for status in [b'I', b'T', b'E'] {
+            let payload = vec![status];
+            let msg = decode_backend(MSG_READY_FOR_QUERY, &payload).unwrap();
+            match msg {
+                BackendMessage::ReadyForQuery { status: s } => assert_eq!(s, status),
+                _ => panic!("expected ReadyForQuery"),
+            }
+        }
+    }
+
+    #[test]
+    fn decode_ready_for_query_empty_returns_error() {
+        assert!(decode_backend(MSG_READY_FOR_QUERY, &[]).is_err());
+    }
+
+    // ── Command complete tags ──────────────────────────────────────────────────
+
+    #[test]
+    fn decode_command_complete_insert_tag() {
+        let mut payload = b"INSERT 0 1".to_vec();
+        payload.push(0);
+        let msg = decode_backend(MSG_COMMAND_COMPLETE, &payload).unwrap();
+        assert!(matches!(msg, BackendMessage::CommandComplete { ref tag } if tag == "INSERT 0 1"));
+    }
+
+    #[test]
+    fn decode_command_complete_update_tag() {
+        let mut payload = b"UPDATE 3".to_vec();
+        payload.push(0);
+        let msg = decode_backend(MSG_COMMAND_COMPLETE, &payload).unwrap();
+        assert!(matches!(msg, BackendMessage::CommandComplete { ref tag } if tag == "UPDATE 3"));
+    }
+
+    #[test]
+    fn decode_command_complete_delete_tag() {
+        let mut payload = b"DELETE 0".to_vec();
+        payload.push(0);
+        let msg = decode_backend(MSG_COMMAND_COMPLETE, &payload).unwrap();
+        assert!(matches!(msg, BackendMessage::CommandComplete { ref tag } if tag == "DELETE 0"));
+    }
+
+    // ── Notice / unknown ───────────────────────────────────────────────────────
+
+    #[test]
+    fn decode_notice_response_returns_notice_variant() {
+        let msg = decode_backend(MSG_NOTICE_RESPONSE, &[]).unwrap();
+        assert!(matches!(msg, BackendMessage::NoticeResponse));
+    }
+
+    #[test]
+    fn decode_unknown_message_type_returns_error() {
+        let result = decode_backend(0xFF, &[]);
+        assert!(result.is_err());
+    }
+
+    // ── Error response edge cases ──────────────────────────────────────────────
+
+    #[test]
+    fn decode_error_response_no_detail_field() {
+        let mut payload = Vec::new();
+        payload.push(b'C');
+        write_cstring(&mut payload, "42P01");
+        payload.push(b'M');
+        write_cstring(&mut payload, "relation does not exist");
+        payload.push(0);
+        let msg = decode_backend(MSG_ERROR_RESPONSE, &payload).unwrap();
+        match msg {
+            BackendMessage::ErrorResponse { detail, .. } => assert!(detail.is_none()),
+            _ => panic!("expected ErrorResponse"),
+        }
+    }
+
+    // ── Encode variants ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn encode_close_statement() {
+        let payload = encode_close(b'S', "my_stmt");
+        assert_eq!(payload[0], b'S');
+        assert_eq!(&payload[1..], b"my_stmt\0");
+    }
+
+    #[test]
+    fn encode_close_portal() {
+        let payload = encode_close(b'P', "my_portal");
+        assert_eq!(payload[0], b'P');
+        assert_eq!(&payload[1..], b"my_portal\0");
+    }
+
+    #[test]
+    fn encode_execute_with_max_rows() {
+        let payload = encode_execute("my_portal", 50);
+        assert!(payload.starts_with(b"my_portal\0"));
+        let max_rows_bytes = &payload[payload.len() - 4..];
+        let max_rows = i32::from_be_bytes([
+            max_rows_bytes[0],
+            max_rows_bytes[1],
+            max_rows_bytes[2],
+            max_rows_bytes[3],
+        ]);
+        assert_eq!(max_rows, 50);
+    }
+
+    #[test]
+    fn encode_password_null_terminated() {
+        let payload = encode_password("secret");
+        assert_eq!(*payload.last().unwrap(), 0);
+        assert!(payload.starts_with(b"secret"));
+    }
+
+    #[test]
+    fn encode_bind_multiple_params() {
+        let params = vec![
+            Some(b"hello".to_vec()),
+            Some(b"42".to_vec()),
+            None,
+        ];
+        let payload = encode_bind("", "stmt", &params);
+        // Layout: "\0stmt\0" + i16(0) fmt_codes + i16(3) params + ...
+        let portal_end = 1; // "\0"
+        let stmt_end = portal_end + "stmt".len() + 1; // "stmt\0"
+        let num_fmt_off = stmt_end; // i16(0) format codes
+        let num_params_off = num_fmt_off + 2; // after i16(0)
+        let num_params =
+            i16::from_be_bytes([payload[num_params_off], payload[num_params_off + 1]]);
+        assert_eq!(num_params, 3);
+    }
+
+    #[test]
+    fn encode_describe_portal() {
+        let payload = encode_describe(b'P', "my_portal");
+        assert_eq!(payload[0], b'P');
+        assert_eq!(&payload[1..], b"my_portal\0");
+    }
+
+    #[test]
+    fn encode_query_null_terminated() {
+        let payload = encode_query("SELECT 42");
+        assert_eq!(*payload.last().unwrap(), 0);
+        assert!(payload.starts_with(b"SELECT 42"));
+    }
+
+    #[test]
+    fn decode_auth_ok_variant() {
+        // Duplicate check: verify type 0 = AuthOk
+        let payload = 0i32.to_be_bytes().to_vec();
+        let msg = decode_backend(MSG_AUTH, &payload).unwrap();
+        assert!(matches!(msg, BackendMessage::AuthOk));
+    }
+
+    #[test]
+    fn encode_startup_terminates_with_null() {
+        let payload = encode_startup("user", "db");
+        assert_eq!(*payload.last().unwrap(), 0);
+    }
+
+    #[test]
+    fn encode_parse_multiple_param_oids() {
+        let payload = encode_parse("s", "SELECT $1, $2", &[23u32, 25u32]); // int4, text
+        let tail = &payload[payload.len() - 10..];
+        let count = i16::from_be_bytes([tail[0], tail[1]]);
+        assert_eq!(count, 2);
+        let oid1 = u32::from_be_bytes([tail[2], tail[3], tail[4], tail[5]]);
+        let oid2 = u32::from_be_bytes([tail[6], tail[7], tail[8], tail[9]]);
+        assert_eq!(oid1, 23);
+        assert_eq!(oid2, 25);
+    }
 }

@@ -219,4 +219,80 @@ mod tests {
             Err(e) => panic!("unexpected error: {e}"),
         }
     }
+
+    // ── Additional TCP listener tests ──────────────────────────────────────
+
+    #[test]
+    fn listener_bind_port_zero_gets_assigned() {
+        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = listener.local_addr().unwrap();
+        assert!(addr.port() > 1024);
+    }
+
+    #[test]
+    fn listener_drop_releases_port() {
+        let addr = {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            listener.local_addr().unwrap()
+        };
+        // After drop, can bind the same address again
+        let _l2 = TcpListener::bind(addr).unwrap();
+    }
+
+    #[test]
+    fn listener_accept_single_connection() {
+        use crate::executor::{block_on_with_spawn, spawn};
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let addr = listener.local_addr().unwrap();
+            let jh = spawn(async move {
+                let _stream = TcpStream::connect(addr).await.unwrap();
+            });
+            let (_conn, peer) = listener.accept().await.unwrap();
+            assert_eq!(peer.ip().to_string(), "127.0.0.1");
+            jh.await.unwrap();
+        });
+    }
+
+    #[test]
+    fn listener_multiple_accepts() {
+        use crate::executor::{block_on_with_spawn, spawn};
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let addr = listener.local_addr().unwrap();
+            for _ in 0..3 {
+                let a = addr;
+                let jh = spawn(async move { TcpStream::connect(a).await.unwrap() });
+                let (_conn, _peer) = listener.accept().await.unwrap();
+                drop(jh);
+            }
+        });
+    }
+
+    #[test]
+    fn listener_local_addr_is_ipv4() {
+        let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = listener.local_addr().unwrap();
+        assert!(addr.is_ipv4());
+    }
+
+    #[test]
+    fn listener_two_binds_different_ports() {
+        let l1 = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let l2 = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        assert_ne!(l1.local_addr().unwrap().port(), l2.local_addr().unwrap().port());
+    }
+
+    #[test]
+    fn listener_accept_peer_addr_is_127_0_0_1() {
+        use crate::executor::{block_on_with_spawn, spawn};
+        block_on_with_spawn(async {
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let addr = listener.local_addr().unwrap();
+            let jh = spawn(async move { TcpStream::connect(addr).await.unwrap() });
+            let (_conn, peer) = listener.accept().await.unwrap();
+            assert_eq!(peer.ip().to_string(), "127.0.0.1");
+            drop(jh);
+        });
+    }
 }

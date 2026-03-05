@@ -129,4 +129,80 @@ mod tests {
         let cors = Cors::permissive().origin("https://example.com");
         assert_eq!(cors.origin_header(), "https://example.com");
     }
+
+    #[test]
+    fn cors_permissive_max_age_is_86400() {
+        let cors = Cors::permissive();
+        assert_eq!(cors.max_age, 86400);
+    }
+
+    #[test]
+    fn cors_max_age_configurable() {
+        let cors = Cors::permissive().max_age(3600);
+        assert_eq!(cors.max_age, 3600);
+    }
+
+    #[test]
+    fn cors_custom_methods() {
+        let cors = Cors::permissive().methods(&["GET", "POST"]);
+        assert_eq!(cors.methods_header(), "GET, POST");
+    }
+
+    #[test]
+    fn cors_custom_allowed_headers() {
+        let cors = Cors::permissive().headers(&["X-Custom-Header"]);
+        assert_eq!(cors.headers_header(), "X-Custom-Header");
+    }
+
+    #[test]
+    fn cors_origin_header_single_origin() {
+        let cors = Cors::permissive().origin("https://app.example.com");
+        assert_eq!(cors.origin_header(), "https://app.example.com");
+    }
+
+    #[test]
+    fn cors_wildcard_origin_allows_all() {
+        let cors = Cors::permissive();
+        assert_eq!(cors.origin_header(), "*");
+    }
+
+    #[test]
+    fn cors_apply_headers_sets_all_three() {
+        let cors = Cors::permissive();
+        let mut resp = Response::new(StatusCode::OK);
+        cors.apply_headers(&mut resp);
+        assert!(resp.headers.get("access-control-allow-origin").is_some());
+        assert!(resp.headers.get("access-control-allow-methods").is_some());
+        assert!(resp.headers.get("access-control-allow-headers").is_some());
+    }
+
+    #[test]
+    fn cors_methods_header_contains_common_methods() {
+        let cors = Cors::permissive();
+        let methods = cors.methods_header();
+        assert!(methods.contains("GET"));
+        assert!(methods.contains("POST"));
+        assert!(methods.contains("PUT"));
+        assert!(methods.contains("DELETE"));
+    }
+
+    #[test]
+    fn cors_headers_header_contains_common_headers() {
+        let cors = Cors::permissive();
+        let headers = cors.headers_header();
+        assert!(headers.contains("Content-Type"));
+        assert!(headers.contains("Authorization"));
+    }
+
+    #[test]
+    fn cors_clone_preserves_config() {
+        let cors = Cors::permissive()
+            .origin("https://test.com")
+            .max_age(1800)
+            .methods(&["GET"]);
+        let cloned = cors.clone();
+        assert_eq!(cloned.origin_header(), "https://test.com");
+        assert_eq!(cloned.max_age, 1800);
+        assert_eq!(cloned.methods_header(), "GET");
+    }
 }

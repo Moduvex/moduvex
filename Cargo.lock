@@ -247,6 +247,7 @@ name = "moduvex-macros"
 version = "0.1.0"
 dependencies = [
  "darling",
+ "moduvex-core",
  "proc-macro2",
  "quote",
  "syn",

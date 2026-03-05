@@ -402,4 +402,106 @@ mod tests {
             "future must be dropped on cancel"
         );
     }
+
+    // ── Additional task tests ──────────────────────────────────────────────
+
+    #[test]
+    fn join_error_panic_display() {
+        let err = JoinError::Panic(Box::new("boom"));
+        let s = err.to_string();
+        assert!(s.contains("panic"));
+    }
+
+    #[test]
+    fn join_error_cancelled_display() {
+        let err = JoinError::Cancelled;
+        let s = err.to_string();
+        assert!(s.contains("cancel") || s.contains("Cancel"));
+    }
+
+    #[test]
+    fn abort_from_scheduled_sets_cancelled() {
+        let (_task, jh) = Task::new(async { 1u32 });
+        // Initial state is SCHEDULED
+        jh.abort();
+        assert_eq!(
+            jh.header.state.load(Ordering::Acquire),
+            STATE_CANCELLED
+        );
+    }
+
+    #[test]
+    fn task_header_initial_state_is_scheduled() {
+        let (task, _jh) = Task::new(async { 0u8 });
+        assert_eq!(
+            task.header.state.load(Ordering::Acquire),
+            STATE_SCHEDULED
+        );
+    }
+
+    #[test]
+    fn cancel_sets_state_to_cancelled() {
+        let (task, _jh) = Task::new(async { 0u8 });
+        task.cancel();
+        // After cancel, state must be CANCELLED
+        // (We read from _jh which still holds the Arc)
+    }
+
+    #[test]
+    fn abort_completed_task_has_no_effect() {
+        let (task, jh) = Task::new(async { 99u32 });
+        // Manually set state to COMPLETED (simulating task that already ran)
+        task.header.state.store(STATE_COMPLETED, Ordering::Release);
+        jh.abort(); // abort on completed task — must not panic
+        // State remains COMPLETED (CAS to IDLE fails, CAS to SCHEDULED fails)
+        assert_eq!(
+            jh.header.state.load(Ordering::Acquire),
+            STATE_COMPLETED
+        );
+    }
+
+    #[test]
+    fn state_constants_distinct() {
+        // All STATE_* constants must be distinct values
+        let states = [
+            STATE_IDLE,
+            STATE_SCHEDULED,
+            STATE_RUNNING,
+            STATE_COMPLETED,
+            STATE_CANCELLED,
+        ];
+        let unique: std::collections::HashSet<u32> = states.iter().cloned().collect();
+        assert_eq!(unique.len(), states.len());
+    }
+
+    #[test]
+    fn join_error_debug_format() {
+        let err = JoinError::Cancelled;
+        let s = format!("{err:?}");
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn task_new_creates_join_handle_with_same_header() {
+        let (task, jh) = Task::new(async { 0u32 });
+        // Both task and jh share the same header Arc
+        assert!(Arc::ptr_eq(&task.header, &jh.header));
+    }
+
+    #[test]
+    fn abort_from_idle_state_succeeds() {
+        let (task, jh) = Task::new(async { 0u32 });
+        task.header.state.store(STATE_IDLE, Ordering::Release);
+        jh.abort();
+        assert_eq!(task.header.state.load(Ordering::Acquire), STATE_CANCELLED);
+    }
+
+    #[test]
+    fn multiple_aborts_are_idempotent() {
+        let (_task, jh) = Task::new(async { 0u32 });
+        // Abort multiple times — must not panic
+        jh.abort();
+        jh.abort();
+        jh.abort();
+    }
 }

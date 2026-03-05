@@ -816,4 +816,469 @@ mod tests {
 
         assert_eq!(counter.load(Ord::SeqCst), N);
     }
+
+    // ── Additional executor tests ──────────────────────────────────────────
+
+    #[test]
+    fn block_on_returns_unit() {
+        block_on(async {});
+    }
+
+    #[test]
+    fn block_on_with_spawn_returns_unit() {
+        block_on_with_spawn(async {});
+    }
+
+    #[test]
+    fn spawn_1000_tasks_single_thread_all_complete() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        block_on_with_spawn(async move {
+            let mut handles = Vec::new();
+            for _ in 0..1000 {
+                let cc = c.clone();
+                handles.push(spawn(async move {
+                    cc.fetch_add(1, Ord::SeqCst);
+                }));
+            }
+            for h in handles {
+                h.await.unwrap();
+            }
+        });
+        assert_eq!(counter.load(Ord::SeqCst), 1000);
+    }
+
+    #[test]
+    fn spawn_in_spawned_task() {
+        let result = block_on_with_spawn(async {
+            let jh = spawn(async {
+                let inner = spawn(async { 42u32 });
+                inner.await.unwrap()
+            });
+            jh.await.unwrap()
+        });
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn join_handle_dropped_without_await_no_panic() {
+        // Drop the JoinHandle without awaiting; executor must not panic or deadlock.
+        block_on_with_spawn(async move {
+            // Spawn a task and immediately drop the handle (detach it).
+            drop(spawn(async move { 42u32 }));
+            // Spawn a second task to give the executor a reason to keep running.
+            // This second task ensures the root future doesn't exit before the
+            // first task has had a chance to run.
+            let jh2 = spawn(async move { 99u32 });
+            jh2.await.unwrap()
+        });
+        // No assertion needed — we just verify no panic/hang.
+    }
+
+    #[test]
+    fn multi_thread_0_workers_fallback_to_single() {
+        // num_workers=0 edge case: should not panic, falls back to single.
+        let result = block_on_multi(async { 7u32 }, 0);
+        assert_eq!(result, 7);
+    }
+
+    #[test]
+    fn multi_thread_3_workers_all_join() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        block_on_multi(
+            async move {
+                let mut handles = Vec::new();
+                for _ in 0..30 {
+                    let cc = c.clone();
+                    handles.push(spawn(async move {
+                        cc.fetch_add(1, Ord::SeqCst);
+                    }));
+                }
+                for h in handles {
+                    h.await.unwrap();
+                }
+            },
+            3,
+        );
+        assert_eq!(counter.load(Ord::SeqCst), 30);
+    }
+
+    #[test]
+    fn multi_thread_nested_spawn() {
+        let result = block_on_multi(
+            async {
+                let jh = spawn(async {
+                    let inner = spawn(async { 99u32 });
+                    inner.await.unwrap()
+                });
+                jh.await.unwrap()
+            },
+            2,
+        );
+        assert_eq!(result, 99);
+    }
+
+    #[test]
+    fn block_on_with_spawn_sequential_ordering() {
+        let order = Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
+        let o = order.clone();
+        block_on_with_spawn(async move {
+            let o1 = o.clone();
+            let o2 = o.clone();
+            let o3 = o.clone();
+            let jh1 = spawn(async move {
+                o1.lock().unwrap().push(1);
+            });
+            let jh2 = spawn(async move {
+                o2.lock().unwrap().push(2);
+            });
+            let jh3 = spawn(async move {
+                o3.lock().unwrap().push(3);
+            });
+            jh1.await.unwrap();
+            jh2.await.unwrap();
+            jh3.await.unwrap();
+        });
+        assert_eq!(order.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn multi_thread_result_type_roundtrip() {
+        let result: Result<u32, String> = block_on_multi(
+            async {
+                let jh = spawn(async { Ok::<u32, String>(42) });
+                jh.await.unwrap()
+            },
+            2,
+        );
+        assert_eq!(result, Ok(42));
+    }
+
+    #[test]
+    fn block_on_returns_string() {
+        let s = block_on(async { String::from("hello world") });
+        assert_eq!(s, "hello world");
+    }
+
+    #[test]
+    fn block_on_returns_vec() {
+        let v = block_on(async { vec![1u32, 2, 3] });
+        assert_eq!(v, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn spawn_returns_computed_value() {
+        let result = block_on_with_spawn(async {
+            let jh = spawn(async { 2u32 * 21 });
+            jh.await.unwrap()
+        });
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn spawn_with_move_captures_outer() {
+        let data = Arc::new(AtomicUsize::new(55));
+        let d = data.clone();
+        let result = block_on_with_spawn(async move {
+            let jh = spawn(async move { d.load(Ord::SeqCst) });
+            jh.await.unwrap()
+        });
+        assert_eq!(result, 55);
+    }
+
+    #[test]
+    fn multi_thread_2_workers_count_50() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        block_on_multi(
+            async move {
+                let mut handles = Vec::new();
+                for _ in 0..50 {
+                    let cc = c.clone();
+                    handles.push(spawn(async move {
+                        cc.fetch_add(1, Ord::SeqCst);
+                    }));
+                }
+                for h in handles {
+                    h.await.unwrap();
+                }
+            },
+            2,
+        );
+        assert_eq!(counter.load(Ord::SeqCst), 50);
+    }
+
+    #[test]
+    fn spawn_chain_3_deep() {
+        let result = block_on_with_spawn(async {
+            let h1 = spawn(async {
+                let h2 = spawn(async {
+                    let h3 = spawn(async { 7u32 });
+                    h3.await.unwrap() * 2
+                });
+                h2.await.unwrap() + 1
+            });
+            h1.await.unwrap()
+        });
+        assert_eq!(result, 15); // 7*2+1 = 15
+    }
+
+    #[test]
+    fn block_on_returns_option() {
+        let v = block_on(async { Some(42u32) });
+        assert_eq!(v, Some(42));
+    }
+
+    #[test]
+    fn block_on_returns_tuple() {
+        let (a, b) = block_on(async { (1u32, 2u32) });
+        assert_eq!(a, 1);
+        assert_eq!(b, 2);
+    }
+
+    #[test]
+    fn spawn_10_independent_tasks_all_increment() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        block_on_with_spawn(async move {
+            let mut handles: Vec<_> = (0..10)
+                .map(|_| {
+                    let cc = c.clone();
+                    spawn(async move {
+                        cc.fetch_add(1, Ord::SeqCst);
+                    })
+                })
+                .collect();
+            for h in handles.drain(..) {
+                h.await.unwrap();
+            }
+        });
+        assert_eq!(counter.load(Ord::SeqCst), 10);
+    }
+
+    #[test]
+    fn multi_thread_5_workers_500_tasks() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        block_on_multi(
+            async move {
+                let handles: Vec<_> = (0..500)
+                    .map(|_| {
+                        let cc = c.clone();
+                        spawn(async move {
+                            cc.fetch_add(1, Ord::SeqCst);
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    h.await.unwrap();
+                }
+            },
+            5,
+        );
+        assert_eq!(counter.load(Ord::SeqCst), 500);
+    }
+
+    #[test]
+    fn block_on_with_spawn_arc_shared_across_tasks() {
+        let shared = Arc::new(AtomicUsize::new(0));
+        let s = shared.clone();
+        block_on_with_spawn(async move {
+            let s1 = s.clone();
+            let s2 = s.clone();
+            let h1 = spawn(async move { s1.fetch_add(10, Ord::SeqCst) });
+            let h2 = spawn(async move { s2.fetch_add(20, Ord::SeqCst) });
+            h1.await.unwrap();
+            h2.await.unwrap();
+        });
+        let v = shared.load(Ord::SeqCst);
+        assert_eq!(v, 30);
+    }
+
+    #[test]
+    fn abort_before_poll_returns_cancelled() {
+        let result = block_on_with_spawn(async {
+            let jh = spawn(async {
+                // This future never completes on its own
+                std::future::poll_fn(|_| std::task::Poll::<()>::Pending).await
+            });
+            jh.abort();
+            jh.await
+        });
+        assert!(matches!(result, Err(task::JoinError::Cancelled)));
+    }
+
+    #[test]
+    fn spawn_returns_unit_output() {
+        block_on_with_spawn(async {
+            let jh = spawn(async {});
+            jh.await.unwrap(); // output is ()
+        });
+    }
+
+    #[test]
+    fn multi_thread_result_err_type_roundtrip() {
+        let result: Result<u32, String> = block_on_multi(
+            async {
+                let jh = spawn(async { Err::<u32, String>("fail".to_string()) });
+                jh.await.unwrap()
+            },
+            2,
+        );
+        assert_eq!(result, Err("fail".to_string()));
+    }
+
+    #[test]
+    fn block_on_f64_value() {
+        let v: f64 = block_on(async { 3.14 });
+        assert!((v - 3.14).abs() < 1e-10);
+    }
+
+    #[test]
+    fn spawn_computes_product_of_two_values() {
+        let result = block_on_with_spawn(async {
+            let a = spawn(async { 6u32 });
+            let b = spawn(async { 7u32 });
+            a.await.unwrap() * b.await.unwrap()
+        });
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn block_on_with_spawn_returns_bool() {
+        let v = block_on_with_spawn(async {
+            let jh = spawn(async { true });
+            jh.await.unwrap()
+        });
+        assert!(v);
+    }
+
+    #[test]
+    fn multi_thread_6_workers_200_tasks() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        block_on_multi(
+            async move {
+                let handles: Vec<_> = (0..200)
+                    .map(|_| {
+                        let cc = c.clone();
+                        spawn(async move {
+                            cc.fetch_add(1, Ord::SeqCst);
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    h.await.unwrap();
+                }
+            },
+            6,
+        );
+        assert_eq!(counter.load(Ord::SeqCst), 200);
+    }
+
+    #[test]
+    fn spawn_task_with_string_return() {
+        let result = block_on_with_spawn(async {
+            let jh = spawn(async { "hello".to_string() });
+            jh.await.unwrap()
+        });
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn block_on_nested_async_fns() {
+        async fn add(a: u32, b: u32) -> u32 {
+            a + b
+        }
+        async fn multiply(a: u32, b: u32) -> u32 {
+            a * b
+        }
+        let result = block_on(async {
+            let sum = add(3, 4).await;
+            multiply(sum, 2).await
+        });
+        assert_eq!(result, 14);
+    }
+
+    #[test]
+    fn block_on_complex_expression() {
+        let result = block_on(async {
+            let a = 10u32;
+            let b = 20u32;
+            a + b + 12
+        });
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn spawn_50_tasks_all_complete_with_counter() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        block_on_with_spawn(async move {
+            let handles: Vec<_> = (0..50)
+                .map(|_| {
+                    let cc = c.clone();
+                    spawn(async move { cc.fetch_add(1, Ord::SeqCst) })
+                })
+                .collect();
+            for h in handles {
+                h.await.unwrap();
+            }
+        });
+        assert_eq!(counter.load(Ord::SeqCst), 50);
+    }
+
+    #[test]
+    fn multi_thread_join_handle_result_preserved() {
+        // Spawned task computes unique value, JoinHandle returns it correctly
+        let values: Vec<u32> = (0..8).collect();
+        let results: Vec<u32> = block_on_multi(
+            async {
+                let handles: Vec<_> = (0..8u32)
+                    .map(|i| spawn(async move { i * i }))
+                    .collect();
+                let mut results = Vec::new();
+                for h in handles {
+                    results.push(h.await.unwrap());
+                }
+                results
+            },
+            4,
+        );
+        assert_eq!(results.len(), 8);
+        for (i, &v) in results.iter().enumerate() {
+            assert_eq!(v, (i as u32) * (i as u32));
+        }
+    }
+
+    #[test]
+    fn block_on_with_spawn_multiple_spawn_waves() {
+        // Spawn tasks in waves to exercise queue cycling
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        block_on_with_spawn(async move {
+            // First wave
+            let handles1: Vec<_> = (0..5)
+                .map(|_| {
+                    let cc = c.clone();
+                    spawn(async move { cc.fetch_add(1, Ord::SeqCst) })
+                })
+                .collect();
+            for h in handles1 {
+                h.await.unwrap();
+            }
+            // Second wave
+            let handles2: Vec<_> = (0..5)
+                .map(|_| {
+                    let cc = c.clone();
+                    spawn(async move { cc.fetch_add(1, Ord::SeqCst) })
+                })
+                .collect();
+            for h in handles2 {
+                h.await.unwrap();
+            }
+        });
+        assert_eq!(counter.load(Ord::SeqCst), 10);
+    }
 }

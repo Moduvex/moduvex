@@ -290,4 +290,96 @@ mod tests {
         // B never completed start so should not be stopped.
         assert!(!events.contains(&"stop:B".to_string()));
     }
+
+    #[test]
+    fn empty_registry_runs_clean() {
+        let registry = ModuleRegistry::new();
+        let ctx = Arc::new(AppContext::new());
+        let engine = LifecycleEngine::new(registry, ctx);
+        let handle = engine.shutdown_handle();
+        handle.request();
+
+        moduvex_runtime::block_on(async move {
+            let result = engine.run().await;
+            assert!(result.is_ok());
+        });
+    }
+
+    #[test]
+    fn lifecycle_engine_shutdown_handle_clone() {
+        let registry = ModuleRegistry::new();
+        let ctx = Arc::new(AppContext::new());
+        let engine = LifecycleEngine::new(registry, ctx);
+
+        let h1 = engine.shutdown_handle();
+        let h2 = h1.clone();
+        h1.request();
+        assert!(h2.is_requested());
+    }
+
+    #[test]
+    fn single_module_starts_and_stops() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = ModuleRegistry::new();
+        registry.push(make_entry("only", Arc::clone(&log), false));
+
+        let ctx = Arc::new(AppContext::new());
+        let engine = LifecycleEngine::new(registry, ctx);
+        let handle = engine.shutdown_handle();
+        handle.request();
+
+        moduvex_runtime::block_on(async move {
+            engine.run().await.unwrap();
+        });
+
+        let events = log.lock().unwrap().clone();
+        assert_eq!(events, ["start:only", "stop:only"]);
+    }
+
+    #[test]
+    fn three_modules_start_then_stop_all_in_reverse() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = ModuleRegistry::new();
+        registry.push(make_entry("X", Arc::clone(&log), false));
+        registry.push(make_entry("Y", Arc::clone(&log), false));
+        registry.push(make_entry("Z", Arc::clone(&log), false));
+
+        let ctx = Arc::new(AppContext::new());
+        let engine = LifecycleEngine::new(registry, ctx);
+        let handle = engine.shutdown_handle();
+        handle.request();
+
+        moduvex_runtime::block_on(async move {
+            engine.run().await.unwrap();
+        });
+
+        let events = log.lock().unwrap().clone();
+        assert_eq!(
+            events,
+            ["start:X", "start:Y", "start:Z", "stop:Z", "stop:Y", "stop:X"]
+        );
+    }
+
+    #[test]
+    fn first_module_fails_no_rollback_needed() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = ModuleRegistry::new();
+        registry.push(make_entry("A", Arc::clone(&log), true)); // A fails immediately
+
+        let ctx = Arc::new(AppContext::new());
+        let engine = LifecycleEngine::new(registry, ctx);
+        let handle = engine.shutdown_handle();
+        handle.request();
+
+        moduvex_runtime::block_on(async move {
+            let result = engine.run().await;
+            assert!(result.is_err());
+        });
+
+        let events = log.lock().unwrap().clone();
+        // A attempted to start (logged before failure)
+        assert!(events.contains(&"start:A".to_string()));
+        // No stop:A since A failed on start
+        assert!(!events.contains(&"stop:A".to_string()));
+    }
 }

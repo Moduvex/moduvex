@@ -140,4 +140,133 @@ mod tests {
             drop(s); // Must not panic or leak.
         });
     }
+
+    // ── Additional sleep tests ─────────────────────────────────────────────
+
+    #[test]
+    fn sleep_past_deadline_returns_immediately() {
+        block_on_with_spawn(async {
+            let deadline = Instant::now() - Duration::from_millis(100);
+            let before = Instant::now();
+            sleep_until(deadline).await;
+            assert!(before.elapsed() < Duration::from_millis(50));
+        });
+    }
+
+    #[test]
+    fn sleep_1ms_completes() {
+        block_on_with_spawn(async {
+            sleep(Duration::from_millis(1)).await;
+        });
+    }
+
+    #[test]
+    fn sleep_concurrent_multiple() {
+        use crate::executor::spawn;
+        block_on_with_spawn(async {
+            let before = Instant::now();
+            let h1 = spawn(async { sleep(Duration::from_millis(50)).await });
+            let h2 = spawn(async { sleep(Duration::from_millis(50)).await });
+            h1.await.unwrap();
+            h2.await.unwrap();
+            // Both sleep concurrently, total time ≈50ms not ≈100ms
+            assert!(before.elapsed() < Duration::from_millis(500));
+        });
+    }
+
+    #[test]
+    fn sleep_until_future_instant() {
+        block_on_with_spawn(async {
+            let deadline = Instant::now() + Duration::from_millis(20);
+            sleep_until(deadline).await;
+            assert!(Instant::now() >= deadline);
+        });
+    }
+
+    #[test]
+    fn sleep_drop_does_not_leak_timer() {
+        // Create many sleeps and drop them; timer wheel must not accumulate stale entries.
+        // If timers were leaked, the executor would never exit (this test completing proves drops worked).
+        block_on_with_spawn(async {
+            for _ in 0..50 {
+                let s = sleep(Duration::from_secs(10));
+                drop(s);
+            }
+        });
+    }
+
+    #[test]
+    fn sleep_10ms_completes() {
+        block_on_with_spawn(async {
+            let before = Instant::now();
+            sleep(Duration::from_millis(10)).await;
+            assert!(before.elapsed() >= Duration::from_millis(5));
+        });
+    }
+
+    #[test]
+    fn sleep_two_sequential_sleeps() {
+        block_on_with_spawn(async {
+            sleep(Duration::from_millis(5)).await;
+            sleep(Duration::from_millis(5)).await;
+            // Simply verifies no hang and no panic.
+        });
+    }
+
+    #[test]
+    fn sleep_until_already_past_instant() {
+        block_on_with_spawn(async {
+            // Instant in the past
+            let past = Instant::now() - Duration::from_secs(1);
+            let before = Instant::now();
+            sleep_until(past).await;
+            // Must complete nearly immediately
+            assert!(before.elapsed() < Duration::from_millis(100));
+        });
+    }
+
+    #[test]
+    fn sleep_duration_zero_uses_zero_const() {
+        block_on_with_spawn(async {
+            // Duration::ZERO is a valid sleep
+            let before = Instant::now();
+            sleep(Duration::ZERO).await;
+            assert!(before.elapsed() < Duration::from_millis(100));
+        });
+    }
+
+    #[test]
+    fn sleep_3_sequential_1ms_each() {
+        block_on_with_spawn(async {
+            for _ in 0..3 {
+                sleep(Duration::from_millis(1)).await;
+            }
+        });
+    }
+
+    #[test]
+    fn sleep_until_now_returns_immediately() {
+        block_on_with_spawn(async {
+            let now = Instant::now();
+            let before = Instant::now();
+            sleep_until(now).await;
+            assert!(before.elapsed() < Duration::from_millis(100));
+        });
+    }
+
+    #[test]
+    fn sleep_multiple_concurrent_different_durations() {
+        use crate::executor::spawn;
+        block_on_with_spawn(async {
+            let before = Instant::now();
+            let h1 = spawn(async { sleep(Duration::from_millis(10)).await });
+            let h2 = spawn(async { sleep(Duration::from_millis(20)).await });
+            let h3 = spawn(async { sleep(Duration::from_millis(30)).await });
+            h1.await.unwrap();
+            h2.await.unwrap();
+            h3.await.unwrap();
+            // Total should be ~30ms if concurrent, not 60ms sequential
+            assert!(before.elapsed() < Duration::from_millis(500));
+        });
+    }
 }

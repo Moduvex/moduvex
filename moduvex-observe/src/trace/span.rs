@@ -126,4 +126,97 @@ mod tests {
             .with_field("status", 200_i32);
         assert_eq!(span.fields.len(), 2);
     }
+
+    #[test]
+    fn span_new_has_no_parent() {
+        let span = Span::new("root");
+        assert!(span.parent_span_id.is_none());
+    }
+
+    #[test]
+    fn span_new_is_open() {
+        let span = Span::new("open_span");
+        assert!(span.end_us.is_none());
+        assert!(span.duration_us().is_none());
+    }
+
+    #[test]
+    fn span_close_sets_end_timestamp() {
+        let mut span = Span::new("closeable");
+        span.close();
+        assert!(span.end_us.is_some());
+    }
+
+    #[test]
+    fn span_close_idempotent() {
+        let mut span = Span::new("idempotent");
+        span.close();
+        let first_end = span.end_us;
+        span.close(); // second close should not update end_us
+        assert_eq!(span.end_us, first_end);
+    }
+
+    #[test]
+    fn span_guard_accesses_span() {
+        let mut span = Span::new("guarded");
+        span = span.with_field("key", "val");
+        let guard = span.enter();
+        assert_eq!(guard.span().name, "guarded");
+        assert_eq!(guard.span().fields.len(), 1);
+        drop(guard);
+    }
+
+    #[test]
+    fn span_duration_is_non_negative() {
+        let mut span = Span::new("timing");
+        {
+            let _g = span.enter();
+        }
+        let dur = span.duration_us().unwrap();
+        // Duration should be 0 or more (saturating_sub ensures non-negative)
+        assert!(dur < 1_000_000_000); // sanity: less than 1000 seconds
+    }
+
+    #[test]
+    fn nested_spans_have_unique_ids() {
+        let root = Span::new("root");
+        let child1 = Span::child("child1", &root);
+        let child2 = Span::child("child2", &root);
+        assert_ne!(child1.span_id, child2.span_id);
+        assert_ne!(child1.span_id, root.span_id);
+    }
+
+    #[test]
+    fn deeply_nested_span_inherits_trace_id() {
+        let root = Span::new("root");
+        let c1 = Span::child("c1", &root);
+        let c2 = Span::child("c2", &c1);
+        let c3 = Span::child("c3", &c2);
+        assert_eq!(c3.trace_id, root.trace_id);
+    }
+
+    #[test]
+    fn span_with_multiple_fields() {
+        let span = Span::new("multi_field")
+            .with_field("a", "alpha")
+            .with_field("b", 42_i32)
+            .with_field("c", true)
+            .with_field("d", 3.14_f64);
+        assert_eq!(span.fields.len(), 4);
+    }
+
+    #[test]
+    fn span_start_us_is_positive() {
+        let span = Span::new("ts_check");
+        // start_us should be a valid UNIX timestamp (after year 2000)
+        assert!(span.start_us > 946_684_800_000_000); // 2000-01-01 in microseconds
+    }
+
+    #[test]
+    fn span_debug_format() {
+        let span = Span::new("debug_span");
+        let s = format!("{span:?}");
+        assert!(s.contains("Span"));
+        assert!(s.contains("debug_span"));
+    }
 }

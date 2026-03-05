@@ -152,4 +152,90 @@ mod tests {
     fn module_custom_priority() {
         assert_eq!(HighPriorityModule.priority(), 100);
     }
+
+    #[test]
+    fn module_default_dep_names_empty() {
+        let m = DummyModule;
+        assert!(m.dep_names().is_empty());
+    }
+
+    #[test]
+    fn module_with_dep_names() {
+        struct DepModule;
+        impl Module for DepModule {
+            fn name(&self) -> &'static str { "dep-module" }
+            fn dep_names(&self) -> Vec<&'static str> { vec!["auth", "db"] }
+        }
+
+        let m = DepModule;
+        let deps = m.dep_names();
+        assert_eq!(deps, vec!["auth", "db"]);
+    }
+
+    #[test]
+    fn module_lifecycle_on_start_and_stop() {
+        use crate::app::context::AppContext;
+        use crate::error::Result;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::{Arc, Mutex};
+
+        struct CountModule {
+            starts: Arc<Mutex<u32>>,
+            stops: Arc<Mutex<u32>>,
+        }
+
+        impl Module for CountModule {
+            fn name(&self) -> &'static str { "counter" }
+        }
+
+        impl ModuleLifecycle for CountModule {
+            fn on_start<'a>(
+                &'a self,
+                _ctx: &'a AppContext,
+            ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+                let starts = Arc::clone(&self.starts);
+                Box::pin(async move {
+                    *starts.lock().unwrap() += 1;
+                    Ok(())
+                })
+            }
+
+            fn on_stop<'a>(
+                &'a self,
+                _ctx: &'a AppContext,
+            ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+                let stops = Arc::clone(&self.stops);
+                Box::pin(async move {
+                    *stops.lock().unwrap() += 1;
+                    Ok(())
+                })
+            }
+        }
+
+        let starts = Arc::new(Mutex::new(0u32));
+        let stops = Arc::new(Mutex::new(0u32));
+        let m = CountModule { starts: Arc::clone(&starts), stops: Arc::clone(&stops) };
+        let ctx = AppContext::new();
+
+        moduvex_runtime::block_on(async {
+            m.on_start(&ctx).await.unwrap();
+            m.on_start(&ctx).await.unwrap();
+            m.on_stop(&ctx).await.unwrap();
+        });
+
+        assert_eq!(*starts.lock().unwrap(), 2);
+        assert_eq!(*stops.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn negative_priority_module() {
+        struct LowPriority;
+        impl Module for LowPriority {
+            fn name(&self) -> &'static str { "low" }
+            fn priority(&self) -> i32 { -100 }
+        }
+
+        assert_eq!(LowPriority.priority(), -100);
+    }
 }

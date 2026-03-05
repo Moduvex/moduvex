@@ -263,4 +263,97 @@ mod tests {
             assert_eq!(&reply[..rn], b"hello");
         });
     }
+
+    // ── Additional UDP socket tests ────────────────────────────────────────
+
+    #[test]
+    fn udp_bind_port_zero_gets_assigned() {
+        let sock = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = sock.local_addr().unwrap();
+        assert!(addr.port() > 1024);
+    }
+
+    #[test]
+    fn udp_send_returns_correct_byte_count() {
+        block_on_with_spawn(async {
+            let receiver = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let recv_addr = receiver.local_addr().unwrap();
+            let sender = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let msg = b"test123";
+            let n = sender.send_to(msg, recv_addr).await.unwrap();
+            assert_eq!(n, msg.len());
+        });
+    }
+
+    #[test]
+    fn udp_recv_from_returns_sender_ip() {
+        block_on_with_spawn(async {
+            let receiver = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let recv_addr = receiver.local_addr().unwrap();
+            let sender = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let sender_addr = sender.local_addr().unwrap();
+            sender.send_to(b"hi", recv_addr).await.unwrap();
+            let mut buf = [0u8; 8];
+            let (_, from) = receiver.recv_from(&mut buf).await.unwrap();
+            assert_eq!(from.ip(), sender_addr.ip());
+        });
+    }
+
+    #[test]
+    fn udp_multiple_datagrams_sequential() {
+        block_on_with_spawn(async {
+            let receiver = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let recv_addr = receiver.local_addr().unwrap();
+            let sender = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+            for i in 0u8..5 {
+                let msg = [i; 1];
+                sender.send_to(&msg, recv_addr).await.unwrap();
+                let mut buf = [0u8; 4];
+                let (n, _) = receiver.recv_from(&mut buf).await.unwrap();
+                assert_eq!(n, 1);
+                assert_eq!(buf[0], i);
+            }
+        });
+    }
+
+    #[test]
+    fn udp_large_datagram_fits_buf() {
+        block_on_with_spawn(async {
+            let receiver = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let recv_addr = receiver.local_addr().unwrap();
+            let sender = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let msg = [42u8; 1024];
+            let n = sender.send_to(&msg, recv_addr).await.unwrap();
+            assert_eq!(n, 1024);
+            let mut buf = [0u8; 1024];
+            let (rn, _) = receiver.recv_from(&mut buf).await.unwrap();
+            assert_eq!(rn, 1024);
+            assert!(buf.iter().all(|&b| b == 42));
+        });
+    }
+
+    #[test]
+    fn udp_two_sockets_cross_exchange() {
+        block_on_with_spawn(async {
+            let a = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let b = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let a_addr = a.local_addr().unwrap();
+            let b_addr = b.local_addr().unwrap();
+
+            // A sends to B
+            a.send_to(b"from_a", b_addr).await.unwrap();
+            let mut buf = [0u8; 8];
+            let (n, from) = b.recv_from(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], b"from_a");
+            assert_eq!(from.ip(), a_addr.ip());
+
+            // B sends to A
+            b.send_to(b"from_b", a_addr).await.unwrap();
+            let mut buf2 = [0u8; 8];
+            let (n2, from2) = a.recv_from(&mut buf2).await.unwrap();
+            assert_eq!(&buf2[..n2], b"from_b");
+            assert_eq!(from2.ip(), b_addr.ip());
+        });
+    }
 }

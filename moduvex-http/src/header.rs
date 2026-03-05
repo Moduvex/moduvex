@@ -164,4 +164,70 @@ mod tests {
         let map = HeaderMap::new();
         assert!(map.get("x-missing").is_none());
     }
+
+    #[test]
+    fn header_map_case_insensitive_get() {
+        let mut map = HeaderMap::new();
+        map.insert("Content-Type", b"text/html".to_vec());
+        // All case variants should find the entry
+        assert!(map.get("content-type").is_some());
+        assert!(map.get("CONTENT-TYPE").is_some());
+        assert!(map.get("Content-Type").is_some());
+    }
+
+    #[test]
+    fn header_map_overwrite_keeps_single_entry() {
+        let mut map = HeaderMap::new();
+        map.insert("x-foo", b"first".to_vec());
+        map.insert("x-foo", b"second".to_vec());
+        assert_eq!(map.get("x-foo").unwrap(), b"second");
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn header_map_contains_check() {
+        let mut map = HeaderMap::new();
+        map.insert("x-present", b"yes".to_vec());
+        assert!(map.contains("x-present"));
+        assert!(map.contains("X-PRESENT")); // case-insensitive
+        assert!(!map.contains("x-absent"));
+    }
+
+    #[test]
+    fn header_map_get_str() {
+        let mut map = HeaderMap::new();
+        map.insert("x-token", b"abc123".to_vec());
+        assert_eq!(map.get_str("x-token"), Some("abc123"));
+        assert_eq!(map.get_str("x-missing"), None);
+    }
+
+    #[test]
+    fn header_map_remove_all_entries() {
+        let mut map = HeaderMap::new();
+        map.append("set-cookie", b"a=1".to_vec());
+        map.append("set-cookie", b"b=2".to_vec());
+        assert_eq!(map.len(), 2);
+        map.remove("set-cookie");
+        assert_eq!(map.len(), 0);
+        assert!(!map.contains("set-cookie"));
+    }
+
+    #[test]
+    fn header_map_iter_preserves_insertion_order() {
+        let mut map = HeaderMap::new();
+        map.insert("a", b"1".to_vec());
+        map.insert("b", b"2".to_vec());
+        map.insert("c", b"3".to_vec());
+        let names: Vec<&str> = map.iter().map(|(n, _)| n).collect();
+        assert_eq!(names, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn header_map_is_empty() {
+        let map = HeaderMap::new();
+        assert!(map.is_empty());
+        let mut map2 = HeaderMap::new();
+        map2.insert("x", b"y".to_vec());
+        assert!(!map2.is_empty());
+    }
 }

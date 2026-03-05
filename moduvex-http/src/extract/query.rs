@@ -106,4 +106,60 @@ mod tests {
         assert_eq!(percent_decode("a%20b"), "a b");
         assert_eq!(percent_decode("100%25"), "100%");
     }
+
+    #[test]
+    fn query_extract_empty_string_value() {
+        let mut req = Request::new(Method::GET, "/search");
+        req.query = Some("q=".to_string());
+        let Query(map) = Query::from_request(&mut req).unwrap();
+        assert_eq!(map.get("q").map(|s| s.as_str()), Some(""));
+    }
+
+    #[test]
+    fn query_extract_multiple_params() {
+        let mut req = Request::new(Method::GET, "/search");
+        req.query = Some("page=2&size=10&sort=asc".to_string());
+        let Query(map) = Query::from_request(&mut req).unwrap();
+        assert_eq!(map.get("page").map(|s| s.as_str()), Some("2"));
+        assert_eq!(map.get("size").map(|s| s.as_str()), Some("10"));
+        assert_eq!(map.get("sort").map(|s| s.as_str()), Some("asc"));
+    }
+
+    #[test]
+    fn query_missing_key_returns_none() {
+        let mut req = Request::new(Method::GET, "/search");
+        req.query = Some("other=val".to_string());
+        let Query(map) = Query::from_request(&mut req).unwrap();
+        assert!(map.get("q").is_none());
+    }
+
+    #[test]
+    fn query_no_query_string_returns_empty_map() {
+        // No query set — should return empty map (not error)
+        let mut req = Request::new(Method::GET, "/search");
+        // req.query is None by default
+        let Query(map) = Query::from_request(&mut req).unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn query_get_helper_method() {
+        let mut req = Request::new(Method::GET, "/");
+        req.query = Some("key=value".to_string());
+        let q = Query::from_request(&mut req).unwrap();
+        assert_eq!(q.get("key"), Some("value"));
+        assert_eq!(q.get("missing"), None);
+    }
+
+    #[test]
+    fn percent_decode_no_encoding() {
+        assert_eq!(percent_decode("plain"), "plain");
+    }
+
+    #[test]
+    fn percent_decode_invalid_hex_kept_as_is() {
+        // Invalid % sequence — kept literally
+        let result = percent_decode("%ZZ");
+        assert_eq!(result, "%ZZ");
+    }
 }

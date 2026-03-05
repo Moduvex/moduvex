@@ -139,4 +139,49 @@ mod tests {
         // Cannot call async methods in sync test, but can verify Arc creation
         assert!(Arc::strong_count(&pool) >= 1);
     }
+
+    // ── Additional health tests ────────────────────────────────────────────────
+
+    #[test]
+    fn health_config_check_interval_nonzero() {
+        let pcfg = PoolConfig::new("postgres://u:p@localhost/db");
+        let hcfg = HealthMonitorConfig::from_pool_config(&pcfg);
+        assert!(hcfg.check_interval > Duration::ZERO);
+    }
+
+    #[test]
+    fn health_config_idle_timeout_nonzero() {
+        let pcfg = PoolConfig::new("postgres://u:p@localhost/db");
+        let hcfg = HealthMonitorConfig::from_pool_config(&pcfg);
+        assert!(hcfg.idle_timeout > Duration::ZERO);
+    }
+
+    #[test]
+    fn health_config_from_custom_pool_config() {
+        let pcfg = PoolConfig::new("postgres://u:p@localhost/db")
+            .health_check_interval(Duration::from_secs(10))
+            .idle_timeout(Duration::from_secs(60));
+        let hcfg = HealthMonitorConfig::from_pool_config(&pcfg);
+        assert_eq!(hcfg.check_interval, Duration::from_secs(10));
+        assert_eq!(hcfg.idle_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn health_config_clone() {
+        let pcfg = PoolConfig::new("postgres://u:p@localhost/db");
+        let hcfg = HealthMonitorConfig::from_pool_config(&pcfg);
+        let hcfg2 = hcfg.clone();
+        assert_eq!(hcfg.check_interval, hcfg2.check_interval);
+        assert_eq!(hcfg.idle_timeout, hcfg2.idle_timeout);
+    }
+
+    #[test]
+    fn pool_arc_shared_count() {
+        let cfg = PoolConfig::new("postgres://u:p@127.0.0.1:5432/db");
+        let pool = ConnectionPool::new(cfg);
+        let pool2 = Arc::clone(&pool);
+        assert_eq!(Arc::strong_count(&pool), 2);
+        drop(pool2);
+        assert_eq!(Arc::strong_count(&pool), 1);
+    }
 }

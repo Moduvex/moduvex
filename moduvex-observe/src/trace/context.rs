@@ -100,4 +100,66 @@ mod tests {
         let result = try_current_context(|ctx| ctx.trace_id);
         assert!(result.is_none());
     }
+
+    #[test]
+    fn span_context_new_has_empty_stack() {
+        let ctx = SpanContext::new();
+        assert!(ctx.span_stack.is_empty());
+        assert!(ctx.current_span_id().is_none());
+    }
+
+    #[test]
+    fn span_context_pop_empty_returns_none() {
+        let mut ctx = SpanContext::new();
+        assert!(ctx.pop_span().is_none());
+    }
+
+    #[test]
+    fn span_context_default_equals_new() {
+        let a = SpanContext::new();
+        let b = SpanContext::default();
+        // Both should have empty stacks; trace IDs differ (generated)
+        assert!(a.span_stack.is_empty());
+        assert!(b.span_stack.is_empty());
+    }
+
+    #[test]
+    fn span_context_inherit_copies_span_stack() {
+        let mut parent = SpanContext::new();
+        let s1 = SpanId::generate();
+        parent.push_span(s1);
+        let child = SpanContext::inherit(&parent);
+        assert_eq!(child.span_stack.len(), 1);
+        assert_eq!(child.span_stack[0], s1);
+    }
+
+    #[test]
+    fn span_context_push_multiple_ordered() {
+        let mut ctx = SpanContext::new();
+        let ids: Vec<_> = (0..5).map(|_| SpanId::generate()).collect();
+        for &id in &ids {
+            ctx.push_span(id);
+        }
+        // Innermost (last pushed) is current
+        assert_eq!(ctx.current_span_id(), Some(*ids.last().unwrap()));
+    }
+
+    #[test]
+    fn span_context_pop_drains_stack() {
+        let mut ctx = SpanContext::new();
+        let s1 = SpanId::generate();
+        let s2 = SpanId::generate();
+        ctx.push_span(s1);
+        ctx.push_span(s2);
+        assert_eq!(ctx.pop_span(), Some(s2));
+        assert_eq!(ctx.pop_span(), Some(s1));
+        assert_eq!(ctx.pop_span(), None);
+    }
+
+    #[test]
+    fn span_context_debug_format() {
+        let ctx = SpanContext::new();
+        let s = format!("{ctx:?}");
+        assert!(s.contains("SpanContext"));
+    }
 }

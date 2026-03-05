@@ -162,4 +162,71 @@ mod tests {
         let r = Response::not_found();
         assert_eq!(r.status, StatusCode::NOT_FOUND);
     }
+
+    #[test]
+    fn internal_error_helper() {
+        let r = Response::internal_error();
+        assert_eq!(r.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            r.headers.get_str("content-type"),
+            Some("text/plain; charset=utf-8")
+        );
+    }
+
+    #[test]
+    fn json_response_sets_content_type() {
+        let r = Response::json(b"{}".to_vec());
+        assert_eq!(r.status, StatusCode::OK);
+        assert_eq!(
+            r.headers.get_str("content-type"),
+            Some("application/json")
+        );
+    }
+
+    #[test]
+    fn response_with_body_status() {
+        let r = Response::with_body(StatusCode::CREATED, "resource created");
+        assert_eq!(r.status, StatusCode::CREATED);
+    }
+
+    #[test]
+    fn response_header_builder() {
+        let r = Response::new(StatusCode::OK)
+            .header("x-foo", b"bar".to_vec())
+            .header("x-baz", b"qux".to_vec());
+        assert_eq!(r.headers.get_str("x-foo"), Some("bar"));
+        assert_eq!(r.headers.get_str("x-baz"), Some("qux"));
+    }
+
+    #[test]
+    fn response_content_type_builder() {
+        let r = Response::new(StatusCode::OK).content_type("text/html");
+        assert_eq!(
+            r.headers.get_str("content-type"),
+            Some("text/html")
+        );
+    }
+
+    #[test]
+    fn into_response_vec_u8_sets_octet_stream() {
+        let bytes: Vec<u8> = vec![0x01, 0x02, 0x03];
+        let r = bytes.into_response();
+        assert_eq!(r.status, StatusCode::OK);
+        assert_eq!(
+            r.headers.get_str("content-type"),
+            Some("application/octet-stream")
+        );
+    }
+
+    #[test]
+    fn into_response_string() {
+        let r = String::from("response body").into_response();
+        assert_eq!(r.status, StatusCode::OK);
+    }
+
+    #[test]
+    fn into_response_status_code() {
+        let r = StatusCode::NO_CONTENT.into_response();
+        assert_eq!(r.status, StatusCode::NO_CONTENT);
+    }
 }

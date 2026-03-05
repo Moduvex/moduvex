@@ -138,4 +138,98 @@ mod tests {
         assert_eq!(db["pool"].as_integer().unwrap(), 20);
         assert!(db["ssl"].as_bool().unwrap());
     }
+
+    #[test]
+    fn deep_merge_non_table_overlay_replaces_base() {
+        // Overlaying a string onto an integer replaces it
+        let base = toml::Value::Integer(42);
+        let overlay = toml::Value::String("replaced".into());
+        let result = deep_merge(base, overlay);
+        assert_eq!(result.as_str().unwrap(), "replaced");
+    }
+
+    #[test]
+    fn deep_merge_base_key_not_in_overlay_preserved() {
+        let base: toml::Value = toml::from_str("[server]\nhost = \"localhost\"\nport = 8080\n").unwrap();
+        let overlay: toml::Value = toml::from_str("[server]\ndebug = true\n").unwrap();
+        let merged = deep_merge(base, overlay);
+        let server = merged["server"].as_table().unwrap();
+        // base keys preserved
+        assert_eq!(server["host"].as_str().unwrap(), "localhost");
+        assert_eq!(server["port"].as_integer().unwrap(), 8080);
+        // overlay key added
+        assert!(server["debug"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn deep_merge_overlay_key_overrides_base() {
+        let base: toml::Value = toml::from_str("[app]\nname = \"base-app\"\n").unwrap();
+        let overlay: toml::Value = toml::from_str("[app]\nname = \"prod-app\"\n").unwrap();
+        let merged = deep_merge(base, overlay);
+        assert_eq!(merged["app"]["name"].as_str().unwrap(), "prod-app");
+    }
+
+    #[test]
+    fn deep_merge_empty_overlay_keeps_base() {
+        let base: toml::Value = toml::from_str("[server]\nport = 3000\n").unwrap();
+        let overlay: toml::Value = toml::from_str("").unwrap();
+        let merged = deep_merge(base, overlay);
+        assert_eq!(merged["server"]["port"].as_integer().unwrap(), 3000);
+    }
+
+    #[test]
+    fn deep_merge_empty_base_uses_overlay() {
+        let base: toml::Value = toml::from_str("").unwrap();
+        let overlay: toml::Value = toml::from_str("[cache]\nttl = 300\n").unwrap();
+        let merged = deep_merge(base, overlay);
+        assert_eq!(merged["cache"]["ttl"].as_integer().unwrap(), 300);
+    }
+
+    #[test]
+    fn load_toml_missing_file_returns_error() {
+        let dir = std::env::temp_dir().join("moduvex-test-nofile");
+        let _ = std::fs::create_dir_all(&dir);
+        let result = load_toml(&dir, "doesnotexist", &Profile::Dev);
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_toml_invalid_syntax_returns_parse_error() {
+        let dir = setup_dir("this is [not valid toml!", None);
+        let result = load_toml(dir.path(), "app", &Profile::Dev);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_toml_profile_overlay_adds_new_keys() {
+        let dir = setup_dir(
+            "[db]\nhost = \"localhost\"\n",
+            Some("[db]\nssl = true\n"),
+        );
+        let val = load_toml(dir.path(), "app", &Profile::Prod).unwrap();
+        let db = val["db"].as_table().unwrap();
+        assert_eq!(db["host"].as_str().unwrap(), "localhost");
+        assert!(db["ssl"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn load_toml_no_profile_overlay_returns_base_only() {
+        let dir = setup_dir("[app]\nversion = \"1.0\"\n", None);
+        // Profile::Dev — no app-dev.toml exists
+        let val = load_toml(dir.path(), "app", &Profile::Dev).unwrap();
+        assert_eq!(val["app"]["version"].as_str().unwrap(), "1.0");
+    }
+
+    #[test]
+    fn load_toml_invalid_profile_overlay_syntax_returns_error() {
+        let dir_path = std::env::temp_dir().join(format!("moduvex-bad-overlay-{}", rand_suffix()));
+        std::fs::create_dir_all(&dir_path).unwrap();
+        std::fs::write(dir_path.join("app.toml"), "[server]\nport = 8080\n").unwrap();
+        std::fs::write(dir_path.join("app-prod.toml"), "[[[ bad toml").unwrap();
+
+        let result = load_toml(&dir_path, "app", &Profile::Prod);
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&dir_path);
+    }
 }

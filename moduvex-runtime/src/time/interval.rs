@@ -194,4 +194,115 @@ mod tests {
             );
         });
     }
+
+    // ── Additional interval tests ──────────────────────────────────────────
+
+    #[test]
+    fn interval_first_tick_after_one_period() {
+        block_on_with_spawn(async {
+            let period = Duration::from_millis(30);
+            let mut ticker = interval(period);
+            let before = Instant::now();
+            ticker.tick().await;
+            assert!(before.elapsed() >= Duration::from_millis(25));
+        });
+    }
+
+    #[test]
+    fn interval_drop_tick_future_cleans_timer() {
+        block_on_with_spawn(async {
+            let mut ticker = interval(Duration::from_secs(10));
+            {
+                let tick_fut = ticker.tick();
+                drop(tick_fut); // drop without polling
+            }
+            // Proceed without hanging — test completes if no timer leak
+        });
+    }
+
+    #[test]
+    fn interval_concurrent_5_tickers() {
+        use crate::executor::spawn;
+        block_on_with_spawn(async {
+            let before = Instant::now();
+            let mut handles = Vec::new();
+            for _ in 0..5 {
+                handles.push(spawn(async {
+                    let mut t = interval(Duration::from_millis(40));
+                    t.tick().await;
+                }));
+            }
+            for h in handles {
+                h.await.unwrap();
+            }
+            // All 5 fire concurrently, not sequentially
+            assert!(before.elapsed() < Duration::from_millis(500));
+        });
+    }
+
+    #[test]
+    fn interval_missed_tick_returns_fast() {
+        let period = Duration::from_millis(10);
+        let mut ticker = interval(period);
+        // Spin well past 2 periods
+        let wait = Instant::now() + period * 4;
+        while Instant::now() < wait {
+            std::hint::spin_loop();
+        }
+        block_on_with_spawn(async move {
+            let now = Instant::now();
+            ticker.tick().await;
+            assert!(
+                now.elapsed() < Duration::from_millis(50),
+                "missed tick must return fast"
+            );
+        });
+    }
+
+    #[test]
+    fn interval_two_ticks_cumulative_time() {
+        block_on_with_spawn(async {
+            let period = Duration::from_millis(20);
+            let mut ticker = interval(period);
+            let before = Instant::now();
+            ticker.tick().await;
+            ticker.tick().await;
+            // At least 2 periods must have elapsed
+            assert!(before.elapsed() >= Duration::from_millis(30));
+        });
+    }
+
+    #[test]
+    fn interval_tick_returns_instant() {
+        block_on_with_spawn(async {
+            let period = Duration::from_millis(20);
+            let mut ticker = interval(period);
+            let fired_at = ticker.tick().await;
+            // fired_at should be in the past (the deadline that fired)
+            assert!(fired_at <= Instant::now());
+        });
+    }
+
+    #[test]
+    fn interval_three_sequential_ticks() {
+        block_on_with_spawn(async {
+            let period = Duration::from_millis(20);
+            let mut ticker = interval(period);
+            for _ in 0..3 {
+                ticker.tick().await;
+            }
+            // Just verifies no hang/panic across 3 sequential ticks
+        });
+    }
+
+    #[test]
+    fn interval_period_1ms_fires_fast() {
+        block_on_with_spawn(async {
+            let mut ticker = interval(Duration::from_millis(1));
+            let before = Instant::now();
+            ticker.tick().await;
+            // 1ms interval fires quickly
+            assert!(before.elapsed() < Duration::from_millis(200));
+        });
+    }
 }

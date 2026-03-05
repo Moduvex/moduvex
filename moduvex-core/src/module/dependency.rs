@@ -162,4 +162,49 @@ mod tests {
         }
         check();
     }
+
+    #[test]
+    fn module_b_alone_with_dep_a_satisfied() {
+        // (ModB, (ModA, ())) — ModB depends on ModA; ModA is in the list
+        fn check() {
+            assert_ok::<(ModB, (ModA, ())), _>();
+        }
+        check();
+    }
+
+    #[test]
+    fn contains_module_head_case() {
+        // (ModA, ()) contains ModA at the head position
+        fn check<L: ContainsModule<ModA, Here>>() {}
+        fn do_check() { check::<(ModA, ())>(); }
+        do_check();
+    }
+
+    #[test]
+    fn contains_module_tail_case() {
+        // (ModB, (ModA, ())) — ModA is in the tail
+        fn check<L: ContainsModule<ModA, There<Here>>>() {}
+        fn do_check() { check::<(ModB, (ModA, ()))>(); }
+        do_check();
+    }
+
+    #[test]
+    fn depends_on_empty_required() {
+        // ModA has no requirements — Required = ()
+        fn check_type_is_unit() {
+            // Just verify ModA::Required is ()
+            let _: <ModA as DependsOn>::Required = ();
+        }
+        check_type_is_unit();
+    }
+
+    #[test]
+    fn all_deps_ok_b_after_a_in_list() {
+        // (ModB, (ModA, ())) has both ModA and ModB in the list.
+        // ModB requires ModA, and (ModB, (ModA, ())) contains ModA — so this is valid.
+        fn check() {
+            assert_ok::<(ModB, (ModA, ())), _>();
+        }
+        check();
+    }
 }

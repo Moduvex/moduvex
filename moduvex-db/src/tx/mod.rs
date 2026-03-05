@@ -200,4 +200,49 @@ mod tests {
         assert_eq!(TransactionState::Active, TransactionState::Active);
         assert_ne!(TransactionState::Active, TransactionState::Committed);
     }
+
+    // ── Additional tx tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn transaction_state_variants_distinct() {
+        assert_ne!(TransactionState::Active, TransactionState::Committed);
+        assert_ne!(TransactionState::Active, TransactionState::RolledBack);
+        assert_ne!(TransactionState::Committed, TransactionState::RolledBack);
+    }
+
+    #[test]
+    fn transaction_state_copy_equality() {
+        let a = TransactionState::Committed;
+        let b = a; // Copy
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn isolation_level_in_begin_sql() {
+        // Verify format used in Transaction::begin
+        let isolation = IsolationLevel::ReadCommitted;
+        let sql = format!("BEGIN ISOLATION LEVEL {}", isolation.as_sql());
+        assert_eq!(sql, "BEGIN ISOLATION LEVEL READ COMMITTED");
+    }
+
+    #[test]
+    fn isolation_level_serializable_begin_sql() {
+        let sql = format!("BEGIN ISOLATION LEVEL {}", IsolationLevel::Serializable.as_sql());
+        assert_eq!(sql, "BEGIN ISOLATION LEVEL SERIALIZABLE");
+    }
+
+    #[test]
+    fn isolation_level_repeatable_read_begin_sql() {
+        let sql = format!("BEGIN ISOLATION LEVEL {}", IsolationLevel::RepeatableRead.as_sql());
+        assert_eq!(sql, "BEGIN ISOLATION LEVEL REPEATABLE READ");
+    }
+
+    #[test]
+    fn pool_transaction_boundary_construction() {
+        use crate::pool::{ConnectionPool, PoolConfig};
+        let cfg = PoolConfig::new("postgres://u:p@localhost:5432/db");
+        let pool = ConnectionPool::new(cfg);
+        let _boundary = PoolTransactionBoundary::new(pool);
+        // Just verify construction doesn't panic
+    }
 }

@@ -200,4 +200,70 @@ mod tests {
         req.query = Some("q=rust".to_string());
         assert_eq!(req.uri(), "/search?q=rust");
     }
+
+    #[test]
+    fn request_path_accessible() {
+        let req = Request::new(Method::GET, "/users/42");
+        assert_eq!(req.path, "/users/42");
+    }
+
+    #[test]
+    fn request_method_accessible() {
+        let req = Request::new(Method::POST, "/");
+        assert_eq!(req.method, Method::POST);
+    }
+
+    #[test]
+    fn request_uri_without_query() {
+        let req = Request::new(Method::GET, "/api/v1");
+        assert_eq!(req.uri(), "/api/v1");
+    }
+
+    #[test]
+    fn request_header_accessor() {
+        let mut req = Request::new(Method::GET, "/");
+        req.headers.insert("x-token", b"secret".to_vec());
+        assert_eq!(req.header("x-token"), Some("secret"));
+        assert_eq!(req.header("x-missing"), None);
+    }
+
+    #[test]
+    fn request_content_length_header() {
+        let mut req = Request::new(Method::POST, "/data");
+        req.headers.insert("content-length", b"42".to_vec());
+        assert_eq!(req.content_length(), Some(42));
+    }
+
+    #[test]
+    fn request_content_length_missing() {
+        let req = Request::new(Method::GET, "/");
+        assert_eq!(req.content_length(), None);
+    }
+
+    #[test]
+    fn request_http10_defaults_to_close() {
+        let mut req = Request::new(Method::GET, "/");
+        req.version = HttpVersion::Http10;
+        assert!(!req.is_keep_alive());
+    }
+
+    #[test]
+    fn request_keep_alive_explicit_header() {
+        let mut req = Request::new(Method::GET, "/");
+        req.version = HttpVersion::Http10;
+        req.headers.insert("connection", b"keep-alive".to_vec());
+        assert!(req.is_keep_alive());
+    }
+
+    #[test]
+    fn extensions_insert_and_get_multiple_types() {
+        let mut req = Request::new(Method::GET, "/");
+        req.extensions.insert(100u32);
+        req.extensions.insert("hello".to_string());
+        assert_eq!(req.extensions.get::<u32>(), Some(&100u32));
+        assert_eq!(
+            req.extensions.get::<String>(),
+            Some(&"hello".to_string())
+        );
+    }
 }

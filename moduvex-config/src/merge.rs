@@ -99,4 +99,77 @@ mod tests {
         assert_eq!(section["host"].as_str().unwrap(), "localhost");
         std::env::remove_var("MODUVEX__TESTMERGE__PORT");
     }
+
+    #[test]
+    fn merge_env_creates_new_section_if_missing() {
+        std::env::set_var("MODUVEX__NEWSECTION__KEY", "value");
+        // base has no [newsection] table
+        let base: Value = toml::from_str("[other]\nfoo = 1\n").unwrap();
+        let merged = merge_env_overrides(base);
+        let section = merged["newsection"].as_table().unwrap();
+        assert_eq!(section["key"].as_str().unwrap(), "value");
+        std::env::remove_var("MODUVEX__NEWSECTION__KEY");
+    }
+
+    #[test]
+    fn merge_env_overwrites_existing_value() {
+        std::env::set_var("MODUVEX__OVERWRITE__HOST", "newhost");
+        let base: Value = toml::from_str("[overwrite]\nhost = \"oldhost\"\n").unwrap();
+        let merged = merge_env_overrides(base);
+        assert_eq!(merged["overwrite"]["host"].as_str().unwrap(), "newhost");
+        std::env::remove_var("MODUVEX__OVERWRITE__HOST");
+    }
+
+    #[test]
+    fn merge_env_lowercases_section_and_key() {
+        std::env::set_var("MODUVEX__CASETEST__MYKEY", "hello");
+        let base: Value = toml::from_str("").unwrap();
+        let merged = merge_env_overrides(base);
+        // Keys should be lowercased
+        assert!(merged.get("casetest").is_some());
+        let section = merged["casetest"].as_table().unwrap();
+        assert!(section.contains_key("mykey"));
+        std::env::remove_var("MODUVEX__CASETEST__MYKEY");
+    }
+
+    #[test]
+    fn parse_env_empty_string_is_string() {
+        assert_eq!(parse_env_value(""), Value::String(String::new()));
+    }
+
+    #[test]
+    fn parse_env_zero_is_integer() {
+        assert_eq!(parse_env_value("0"), Value::Integer(0));
+    }
+
+    #[test]
+    fn parse_env_negative_float() {
+        assert_eq!(parse_env_value("-3.14"), Value::Float(-3.14));
+    }
+
+    #[test]
+    fn parse_env_string_with_spaces() {
+        assert_eq!(
+            parse_env_value("hello world"),
+            Value::String("hello world".into())
+        );
+    }
+
+    #[test]
+    fn parse_env_true_uppercase() {
+        assert_eq!(parse_env_value("TRUE"), Value::Boolean(true));
+    }
+
+    #[test]
+    fn parse_env_false_mixed_case() {
+        assert_eq!(parse_env_value("False"), Value::Boolean(false));
+    }
+
+    #[test]
+    fn non_table_base_is_returned_unchanged() {
+        // merge_env_overrides skips non-table root values
+        let base = Value::String("not-a-table".into());
+        let result = merge_env_overrides(base.clone());
+        assert_eq!(result, base);
+    }
 }

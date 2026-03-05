@@ -426,4 +426,177 @@ mod tests {
         // Must be decodable as Base64
         Base64::decode_vec(&nonce).expect("nonce should be valid base64");
     }
+
+    // ── Additional SCRAM tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn scram_nonce_length_is_24_chars() {
+        let n = generate_nonce();
+        assert_eq!(n.len(), 24, "nonce must be 24 base64 chars (18 bytes → 24 base64)");
+    }
+
+    #[test]
+    fn scram_two_nonces_differ() {
+        let n1 = generate_nonce();
+        let n2 = generate_nonce();
+        // On most systems, two random nonces should differ
+        // (failing with probability 1/2^144 — effectively impossible)
+        assert_ne!(n1, n2, "nonces must be unique");
+    }
+
+    #[test]
+    fn scram_nonce_is_valid_base64() {
+        let n = generate_nonce();
+        // All chars must be valid base64 chars
+        assert!(n.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='));
+    }
+
+    #[test]
+    fn scram_server_first_missing_nonce_returns_error() {
+        let client = ScramClient {
+            username: "user".into(),
+            password: "pass".into(),
+            client_nonce: "abc123".into(),
+        };
+        let bad = "s=c2FsdA==,i=4096"; // missing r=
+        let result = client.process_server_first(bad);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn scram_server_first_missing_salt_returns_error() {
+        let client = ScramClient {
+            username: "user".into(),
+            password: "pass".into(),
+            client_nonce: "abc123".into(),
+        };
+        let bad = "r=abc123serverext,i=4096"; // missing s=
+        let result = client.process_server_first(bad);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn scram_server_first_missing_iterations_returns_error() {
+        let client = ScramClient {
+            username: "user".into(),
+            password: "pass".into(),
+            client_nonce: "abc123".into(),
+        };
+        let bad = "r=abc123serverext,s=c2FsdA=="; // missing i=
+        let result = client.process_server_first(bad);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn scram_server_first_bad_iteration_count_returns_error() {
+        let client = ScramClient {
+            username: "user".into(),
+            password: "pass".into(),
+            client_nonce: "abc123".into(),
+        };
+        let bad = "r=abc123ext,s=c2FsdA==,i=notanumber";
+        let result = client.process_server_first(bad);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn scram_server_first_wrong_nonce_prefix_returns_error() {
+        // Server nonce must start with client nonce
+        let client = ScramClient {
+            username: "user".into(),
+            password: "pass".into(),
+            client_nonce: "client_nonce".into(),
+        };
+        let bad = "r=differentnonce,s=c2FsdA==,i=4096";
+        let result = client.process_server_first(bad);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn scram_pbkdf2_deterministic() {
+        let r1 = pbkdf2_hmac_sha256(b"pass", b"salt", 1000);
+        let r2 = pbkdf2_hmac_sha256(b"pass", b"salt", 1000);
+        assert_eq!(r1, r2, "pbkdf2 must be deterministic");
+    }
+
+    #[test]
+    fn scram_pbkdf2_different_passwords_differ() {
+        let r1 = pbkdf2_hmac_sha256(b"pass1", b"salt", 100);
+        let r2 = pbkdf2_hmac_sha256(b"pass2", b"salt", 100);
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn scram_pbkdf2_different_salts_differ() {
+        let r1 = pbkdf2_hmac_sha256(b"pass", b"salt1", 100);
+        let r2 = pbkdf2_hmac_sha256(b"pass", b"salt2", 100);
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn scram_client_proof_length_is_32_bytes() {
+        // Full flow to obtain client proof via process_server_first
+        let client = ScramClient {
+            username: "user".into(),
+            password: "pencil".into(),
+            client_nonce: "rOprNGfwEbeRWgbNEkqO".into(),
+        };
+        let server_first =
+            "r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096";
+        let (client_final, server_sig) = client.process_server_first(server_first).unwrap();
+        // client_final has p=<base64 proof>; proof decodes to 32 bytes
+        let p_part = client_final.split("p=").nth(1).unwrap();
+        let proof = Base64::decode_vec(p_part).unwrap();
+        assert_eq!(proof.len(), 32);
+        // server_sig is also 32 bytes
+        assert_eq!(server_sig.len(), 32);
+    }
+
+    #[test]
+    fn scram_verify_wrong_server_sig_returns_error() {
+        let client = ScramClient {
+            username: "user".into(),
+            password: "pencil".into(),
+            client_nonce: "rOprNGfwEbeRWgbNEkqO".into(),
+        };
+        // A wrong server-final signature
+        let wrong_final = "v=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        let server_first =
+            "r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096";
+        let (_, expected_sig) = client.process_server_first(server_first).unwrap();
+        let result = client.verify_server_final(wrong_final, &expected_sig);
+        // wrong server final should fail verification
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_attr_returns_none_for_missing_key() {
+        let msg = "r=nonce,s=salt";
+        assert_eq!(extract_attr(msg, 'i'), None);
+    }
+
+    #[test]
+    fn decode_sasl_continue_extracts_payload() {
+        let server_first = "r=nonce,s=c2FsdA==,i=4096";
+        let mut payload = 11i32.to_be_bytes().to_vec(); // sub=11
+        payload.extend_from_slice(server_first.as_bytes());
+        let result = decode_sasl_continue(&payload).unwrap();
+        assert_eq!(result, server_first);
+    }
+
+    #[test]
+    fn decode_sasl_final_extracts_payload() {
+        let server_final = "v=somebase64value=";
+        let mut payload = 12i32.to_be_bytes().to_vec(); // sub=12
+        payload.extend_from_slice(server_final.as_bytes());
+        let result = decode_sasl_final(&payload).unwrap();
+        assert_eq!(result, server_final);
+    }
+
+    #[test]
+    fn encode_sasl_response_is_utf8_bytes() {
+        let msg = "c=biws,r=nonce,p=proof=";
+        let buf = encode_sasl_response(msg);
+        assert_eq!(buf, msg.as_bytes());
+    }
 }

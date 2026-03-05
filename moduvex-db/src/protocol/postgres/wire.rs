@@ -185,4 +185,95 @@ mod tests {
             4 + payload.len() as i32
         );
     }
+
+    // ── Additional wire tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn write_cstring_empty_string() {
+        let mut buf = Vec::new();
+        write_cstring(&mut buf, "");
+        assert_eq!(buf, b"\0");
+    }
+
+    #[test]
+    fn read_cstring_empty_returns_empty_string() {
+        let buf = b"\0remaining";
+        let (s, off) = read_cstring(buf, 0).unwrap();
+        assert_eq!(s, "");
+        assert_eq!(off, 1);
+    }
+
+    #[test]
+    fn read_cstring_out_of_bounds_returns_error() {
+        let buf = b"no null terminator here";
+        assert!(read_cstring(buf, 0).is_err());
+    }
+
+    #[test]
+    fn read_cstring_at_offset() {
+        let mut buf = Vec::new();
+        write_cstring(&mut buf, "first");
+        write_cstring(&mut buf, "second");
+        let (first, off1) = read_cstring(&buf, 0).unwrap();
+        let (second, _off2) = read_cstring(&buf, off1).unwrap();
+        assert_eq!(first, "first");
+        assert_eq!(second, "second");
+    }
+
+    #[test]
+    fn read_cstring_at_non_zero_offset() {
+        // Write two cstrings, read the second starting from known offset
+        let mut buf = Vec::new();
+        write_cstring(&mut buf, "skip");
+        let second_offset = buf.len(); // offset of second string
+        write_cstring(&mut buf, "target");
+        let (s, _) = read_cstring(&buf, second_offset).unwrap();
+        assert_eq!(s, "target");
+    }
+
+    #[test]
+    fn write_cstring_appends_null() {
+        let mut buf = Vec::new();
+        write_cstring(&mut buf, "hello");
+        assert_eq!(buf.last(), Some(&0u8));
+        assert_eq!(buf.len(), 6); // 5 chars + null
+    }
+
+    #[test]
+    fn frontend_frame_layout_length_includes_itself() {
+        // length = 4 (self) + payload.len()
+        let payload = b"test";
+        let msg_type = b'Q';
+        let mut frame = Vec::new();
+        frame.push(msg_type);
+        let length = (4i32 + payload.len() as i32).to_be_bytes();
+        frame.extend_from_slice(&length);
+        frame.extend_from_slice(payload);
+        // Verify length field value
+        let len_val = i32::from_be_bytes([frame[1], frame[2], frame[3], frame[4]]);
+        assert_eq!(len_val, 4 + payload.len() as i32);
+    }
+
+    #[test]
+    fn read_cstring_unicode_string() {
+        let mut buf = Vec::new();
+        write_cstring(&mut buf, "héllo");
+        let (s, _) = read_cstring(&buf, 0).unwrap();
+        assert_eq!(s, "héllo");
+    }
+
+    #[test]
+    fn multiple_cstrings_sequential_roundtrip() {
+        let strings = ["alpha", "beta", "gamma", "delta"];
+        let mut buf = Vec::new();
+        for s in &strings {
+            write_cstring(&mut buf, s);
+        }
+        let mut offset = 0;
+        for expected in &strings {
+            let (s, next) = read_cstring(&buf, offset).unwrap();
+            assert_eq!(&s, expected);
+            offset = next;
+        }
+    }
 }

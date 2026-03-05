@@ -409,4 +409,319 @@ mod tests {
             assert!(result.is_err());
         });
     }
+
+    // ── Additional MPSC tests ──────────────────────────────────────────────
+
+    #[test]
+    fn bounded_capacity_1_sequential_sends() {
+        block_on_with_spawn(async {
+            let (tx, mut rx) = channel::<u32>(1);
+            for i in 0..5u32 {
+                tx.send(i).await.unwrap();
+                assert_eq!(rx.recv().await, Some(i));
+            }
+        });
+    }
+
+    #[test]
+    fn bounded_clone_increments_sender_count() {
+        block_on(async {
+            let (tx, mut rx) = channel::<u32>(4);
+            let tx2 = tx.clone();
+            tx.send(1).await.unwrap();
+            tx2.send(2).await.unwrap();
+            drop(tx);
+            assert_eq!(rx.recv().await, Some(1));
+            assert_eq!(rx.recv().await, Some(2));
+            // tx2 still alive — channel not yet closed
+            drop(tx2);
+            assert_eq!(rx.recv().await, None); // now closed
+        });
+    }
+
+    #[test]
+    fn unbounded_stress_100_msgs() {
+        block_on_with_spawn(async {
+            let (tx, mut rx) = unbounded::<u32>();
+            let jh = spawn(async move {
+                for i in 0..100u32 {
+                    tx.send(i).unwrap();
+                }
+            });
+            jh.await.unwrap();
+            let mut count = 0u32;
+            while let Some(v) = rx.recv().await {
+                assert_eq!(v, count);
+                count += 1;
+            }
+            assert_eq!(count, 100);
+        });
+    }
+
+    #[test]
+    fn bounded_send_future_drop_cleans_waker() {
+        block_on(async {
+            let (tx, rx) = channel::<u32>(1);
+            tx.send(1).await.unwrap(); // fill
+            // Create send future but drop it without polling
+            let fut = tx.send(2);
+            drop(fut); // must not panic or corrupt waker list
+            drop(rx);
+        });
+    }
+
+    #[test]
+    fn bounded_multiple_senders_all_items_received() {
+        block_on_with_spawn(async {
+            let (tx1, mut rx) = channel::<u32>(16);
+            let tx2 = tx1.clone();
+            let tx3 = tx2.clone();
+            let jh1 = spawn(async move {
+                for i in 0..3u32 {
+                    tx1.send(i).await.unwrap();
+                }
+            });
+            let jh2 = spawn(async move {
+                for i in 10..13u32 {
+                    tx2.send(i).await.unwrap();
+                }
+            });
+            let jh3 = spawn(async move {
+                for i in 20..23u32 {
+                    tx3.send(i).await.unwrap();
+                }
+            });
+            jh1.await.unwrap();
+            jh2.await.unwrap();
+            jh3.await.unwrap();
+            // Collect exactly 9 items (3 per sender × 3 senders)
+            let mut vals: Vec<u32> = Vec::new();
+            for _ in 0..9 {
+                if let Some(v) = rx.recv().await {
+                    vals.push(v);
+                }
+            }
+            vals.sort();
+            assert_eq!(vals, vec![0, 1, 2, 10, 11, 12, 20, 21, 22]);
+        });
+    }
+
+    #[test]
+    fn unbounded_capacity_is_unlimited() {
+        block_on(async {
+            let (tx, mut rx) = unbounded::<u32>();
+            // Send 500 items without consuming — should never block
+            for i in 0..500u32 {
+                tx.send(i).unwrap();
+            }
+            for i in 0..500u32 {
+                assert_eq!(rx.recv().await, Some(i));
+            }
+        });
+    }
+
+    #[test]
+    fn bounded_receiver_drop_mid_queue() {
+        block_on(async {
+            let (tx, rx) = channel::<u32>(4);
+            tx.send(1).await.unwrap();
+            tx.send(2).await.unwrap();
+            drop(rx); // items queued but receiver dropped
+            // Subsequent send must return Err immediately
+            let result = tx.send(3).await;
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn bounded_channel_capacity_max_1_enforced() {
+        block_on_with_spawn(async {
+            let (tx, mut rx) = channel::<u32>(1);
+            tx.send(10).await.unwrap();
+            let tx2 = tx.clone();
+            let jh = spawn(async move {
+                // This should block until rx consumes the first item
+                tx2.send(20).await.unwrap();
+            });
+            // Consume first
+            let v = rx.recv().await.unwrap();
+            assert_eq!(v, 10);
+            jh.await.unwrap();
+            let v2 = rx.recv().await.unwrap();
+            assert_eq!(v2, 20);
+        });
+    }
+
+    #[test]
+    fn bounded_channel_string_type() {
+        block_on(async {
+            let (tx, mut rx) = channel::<String>(4);
+            tx.send("hello".to_string()).await.unwrap();
+            tx.send("world".to_string()).await.unwrap();
+            drop(tx);
+            assert_eq!(rx.recv().await, Some("hello".to_string()));
+            assert_eq!(rx.recv().await, Some("world".to_string()));
+            assert_eq!(rx.recv().await, None);
+        });
+    }
+
+    #[test]
+    fn unbounded_clone_sender_count() {
+        block_on(async {
+            let (tx, mut rx) = unbounded::<u32>();
+            let tx2 = tx.clone();
+            let tx3 = tx2.clone();
+            tx.send(1).unwrap();
+            tx2.send(2).unwrap();
+            tx3.send(3).unwrap();
+            drop(tx);
+            drop(tx2);
+            assert_eq!(rx.recv().await, Some(1));
+            assert_eq!(rx.recv().await, Some(2));
+            assert_eq!(rx.recv().await, Some(3));
+            // tx3 still alive
+            drop(tx3);
+            assert_eq!(rx.recv().await, None);
+        });
+    }
+
+    #[test]
+    fn bounded_capacity_2_allows_2_sends_before_blocking() {
+        block_on_with_spawn(async {
+            let (tx, mut rx) = channel::<u32>(2);
+            // Both of these should succeed immediately without blocking
+            tx.send(1).await.unwrap();
+            tx.send(2).await.unwrap();
+            // These should be buffered
+            assert_eq!(rx.recv().await, Some(1));
+            assert_eq!(rx.recv().await, Some(2));
+        });
+    }
+
+    #[test]
+    fn unbounded_receiver_close_mid_batch() {
+        block_on(async {
+            let (tx, rx) = unbounded::<u32>();
+            // Send several items
+            for i in 0..5 {
+                tx.send(i).unwrap();
+            }
+            drop(rx);
+            // Subsequent sends must fail
+            assert!(tx.send(99).is_err());
+        });
+    }
+
+    #[test]
+    fn bounded_channel_capacity_10_fills_before_block() {
+        block_on_with_spawn(async {
+            let (tx, mut rx) = channel::<u32>(10);
+            // Fill all 10 slots
+            for i in 0..10u32 {
+                tx.send(i).await.unwrap();
+            }
+            // Drain all
+            for i in 0..10u32 {
+                assert_eq!(rx.recv().await, Some(i));
+            }
+        });
+    }
+
+    #[test]
+    fn bounded_single_item_channel_send_recv_alternating() {
+        block_on_with_spawn(async {
+            let (tx, mut rx) = channel::<u32>(1);
+            for i in 0..10u32 {
+                tx.send(i * 2).await.unwrap();
+                let v = rx.recv().await.unwrap();
+                assert_eq!(v, i * 2);
+            }
+        });
+    }
+
+    #[test]
+    fn unbounded_send_err_value_preserves_original() {
+        let (tx, rx) = unbounded::<String>();
+        drop(rx);
+        let original = "test_value".to_string();
+        let result = tx.send(original.clone());
+        assert_eq!(result, Err(original));
+    }
+
+    #[test]
+    fn bounded_send_err_value_preserves_original() {
+        block_on(async {
+            let (tx, rx) = channel::<String>(4);
+            drop(rx);
+            let original = "test".to_string();
+            let result = tx.send(original.clone()).await;
+            assert_eq!(result, Err(original));
+        });
+    }
+
+    #[test]
+    fn bounded_three_senders_one_receiver_pipelining() {
+        block_on_with_spawn(async {
+            let (tx, mut rx) = channel::<u32>(3);
+            let tx2 = tx.clone();
+            let tx3 = tx.clone();
+            // Send 1 each from 3 senders (within capacity)
+            tx.send(100).await.unwrap();
+            tx2.send(200).await.unwrap();
+            tx3.send(300).await.unwrap();
+            let mut results = vec![
+                rx.recv().await.unwrap(),
+                rx.recv().await.unwrap(),
+                rx.recv().await.unwrap(),
+            ];
+            results.sort();
+            assert_eq!(results, vec![100, 200, 300]);
+        });
+    }
+
+    #[test]
+    fn bounded_channel_preserves_ordering() {
+        block_on(async {
+            let (tx, mut rx) = channel::<u32>(5);
+            for i in 0..5u32 {
+                tx.send(i * 10).await.unwrap();
+            }
+            for i in 0..5u32 {
+                assert_eq!(rx.recv().await, Some(i * 10));
+            }
+        });
+    }
+
+    #[test]
+    fn unbounded_immediately_closed_channel() {
+        block_on(async {
+            let (tx, rx) = unbounded::<u32>();
+            drop(tx);
+            drop(rx);
+            // Just verifies no panic on immediate close
+        });
+    }
+
+    #[test]
+    fn bounded_immediately_closed_channel() {
+        block_on(async {
+            let (tx, rx) = channel::<u32>(1);
+            drop(tx);
+            drop(rx);
+            // Just verifies no panic on immediate close
+        });
+    }
+
+    #[test]
+    fn unbounded_send_option_type() {
+        block_on(async {
+            let (tx, mut rx) = unbounded::<Option<u32>>();
+            tx.send(Some(42)).unwrap();
+            tx.send(None).unwrap();
+            drop(tx);
+            assert_eq!(rx.recv().await, Some(Some(42)));
+            assert_eq!(rx.recv().await, Some(None));
+            assert_eq!(rx.recv().await, None);
+        });
+    }
 }

@@ -15,3 +15,6 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = "1"
 darling = "0.23"
+
+[dev-dependencies]
+moduvex-core = { path = "../moduvex-core" }

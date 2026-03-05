@@ -89,4 +89,83 @@ mod tests {
         }
         assert_eq!(c.get(), 4000);
     }
+
+    #[test]
+    fn counter_starts_at_zero() {
+        let c = Counter::new("fresh", "fresh counter");
+        assert_eq!(c.get(), 0);
+    }
+
+    #[test]
+    fn counter_inc_by_zero_is_noop() {
+        let c = Counter::new("noop", "");
+        c.inc_by(0);
+        assert_eq!(c.get(), 0);
+    }
+
+    #[test]
+    fn counter_inc_by_large_value() {
+        let c = Counter::new("large", "");
+        c.inc_by(u64::MAX / 2);
+        assert_eq!(c.get(), u64::MAX / 2);
+    }
+
+    #[test]
+    fn counter_name_and_help() {
+        let c = Counter::new("my_metric_total", "counts things");
+        assert_eq!(c.name(), "my_metric_total");
+        assert_eq!(c.help(), "counts things");
+    }
+
+    #[test]
+    fn counter_debug_format() {
+        let c = Counter::new("dbg", "debug test");
+        c.inc_by(7);
+        let s = format!("{c:?}");
+        assert!(s.contains("Counter"));
+        assert!(s.contains("dbg"));
+        assert!(s.contains('7'));
+    }
+
+    #[test]
+    fn counter_multiple_increments_accumulate() {
+        let c = Counter::new("accum", "");
+        for i in 1u64..=100 {
+            c.inc_by(i);
+        }
+        // sum(1..=100) = 5050
+        assert_eq!(c.get(), 5050);
+    }
+
+    #[test]
+    fn counter_inc_and_inc_by_interleaved() {
+        let c = Counter::new("mixed", "");
+        c.inc();
+        c.inc_by(9);
+        c.inc();
+        assert_eq!(c.get(), 11);
+    }
+
+    #[test]
+    fn counter_concurrent_inc_by() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let c = Arc::new(Counter::new("conc_by", ""));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let c = Arc::clone(&c);
+                thread::spawn(move || {
+                    for _ in 0..500 {
+                        c.inc_by(2);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        // 8 threads * 500 iterations * 2 = 8000
+        assert_eq!(c.get(), 8000);
+    }
 }

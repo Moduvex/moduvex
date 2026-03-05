@@ -160,4 +160,99 @@ mod tests {
         let buf = b"5;ext=ignored\r\nhello\r\n0\r\n\r\n";
         assert_eq!(decode_chunked(buf).unwrap(), b"hello");
     }
+
+    // ── Encoding ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn encode_single_chunk_format() {
+        // Verify chunked encoding format: "<hex-len>\r\n<data>\r\n"
+        let mut out = Vec::new();
+        encode_chunk(b"hello", &mut out);
+        assert_eq!(out, b"5\r\nhello\r\n");
+    }
+
+    #[test]
+    fn encode_empty_data_is_noop() {
+        // encode_chunk does nothing for empty data; write_final_chunk writes terminator
+        let mut out = Vec::new();
+        encode_chunk(b"", &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn write_final_chunk_produces_terminator() {
+        let mut out = Vec::new();
+        write_final_chunk(&mut out);
+        assert_eq!(out, b"0\r\n\r\n");
+    }
+
+    #[test]
+    fn encode_large_chunk_hex_size() {
+        let data = vec![b'x'; 256];
+        let mut out = Vec::new();
+        encode_chunk(&data, &mut out);
+        assert!(out.starts_with(b"100\r\n")); // 256 = 0x100
+    }
+
+    // ── Additional decode tests ───────────────────────────────────────────
+
+    #[test]
+    fn decode_chunked_large_single_chunk() {
+        let data = vec![b'A'; 1000];
+        let mut encoded = format!("{:x}\r\n", data.len()).into_bytes();
+        encoded.extend_from_slice(&data);
+        encoded.extend_from_slice(b"\r\n0\r\n\r\n");
+        let decoded = decode_chunked(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn decode_chunked_three_chunks_then_terminator() {
+        let mut encoded = Vec::new();
+        encoded.extend_from_slice(b"3\r\nfoo\r\n");
+        encoded.extend_from_slice(b"3\r\nbar\r\n");
+        encoded.extend_from_slice(b"3\r\nbaz\r\n");
+        encoded.extend_from_slice(b"0\r\n\r\n");
+        let decoded = decode_chunked(&encoded).unwrap();
+        assert_eq!(decoded, b"foobarbaz");
+    }
+
+    #[test]
+    fn decode_chunked_invalid_hex_returns_error() {
+        let buf = b"ZZZZ\r\nhello\r\n0\r\n\r\n";
+        assert!(decode_chunked(buf).is_err());
+    }
+
+    #[test]
+    fn decode_chunked_missing_terminator_returns_incomplete() {
+        // No terminating chunk — should return Incomplete error
+        let buf = b"5\r\nhello\r\n";
+        assert_eq!(decode_chunked(buf), Err(ChunkedError::Incomplete));
+    }
+
+    #[test]
+    fn decode_chunked_uppercase_hex_works() {
+        // Hex digits are case-insensitive per RFC
+        let buf = b"5\r\nhello\r\n0\r\n\r\n";
+        let decoded = decode_chunked(buf).unwrap();
+        assert_eq!(decoded, b"hello");
+    }
+
+    #[test]
+    fn decode_chunked_round_trip_via_encode() {
+        // Encode then decode, verify identity
+        let original = b"The quick brown fox";
+        let mut encoded = Vec::new();
+        encode_chunk(original, &mut encoded);
+        write_final_chunk(&mut encoded);
+        let decoded = decode_chunked(&encoded).unwrap();
+        assert_eq!(decoded.as_slice(), original.as_slice());
+    }
+
+    #[test]
+    fn decode_chunked_zero_chunk_only() {
+        // Only the terminating chunk
+        let buf = b"0\r\n\r\n";
+        assert_eq!(decode_chunked(buf).unwrap(), b"");
+    }
 }

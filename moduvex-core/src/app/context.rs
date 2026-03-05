@@ -167,4 +167,113 @@ mod tests {
         req.insert(99u64);
         assert_eq!(*req.get_extension::<u64>().unwrap(), 99);
     }
+
+    #[test]
+    fn app_context_default_is_empty() {
+        let ctx = AppContext::default();
+        assert!(!ctx.contains::<u32>());
+    }
+
+    #[test]
+    fn app_context_insert_overwrites_existing() {
+        let ctx = AppContext::new();
+        ctx.insert(Arc::new(1u32));
+        ctx.insert(Arc::new(2u32));
+        assert_eq!(*ctx.get::<u32>().unwrap(), 2);
+    }
+
+    #[test]
+    fn app_context_require_present_returns_arc() {
+        let ctx = AppContext::new();
+        ctx.insert(Arc::new("hello".to_string()));
+        let val = ctx.require::<String>().unwrap();
+        assert_eq!(val.as_str(), "hello");
+    }
+
+    #[test]
+    fn app_context_require_missing_error_message_contains_type() {
+        let ctx = AppContext::new();
+        let err = ctx.require::<u64>().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("u64"), "error message should mention the type: {msg}");
+    }
+
+    #[test]
+    fn app_context_multiple_different_types() {
+        let ctx = AppContext::new();
+        ctx.insert(Arc::new(42u32));
+        ctx.insert(Arc::new("world".to_string()));
+        ctx.insert(Arc::new(3.14f64));
+        assert_eq!(*ctx.get::<u32>().unwrap(), 42);
+        assert_eq!(ctx.get::<String>().unwrap().as_str(), "world");
+        assert!((ctx.get::<f64>().unwrap().as_ref() - 3.14f64).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn app_context_concurrent_access() {
+        use std::thread;
+        let ctx = Arc::new(AppContext::new());
+        ctx.insert(Arc::new(777u32));
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let c = Arc::clone(&ctx);
+                thread::spawn(move || {
+                    assert_eq!(*c.get::<u32>().unwrap(), 777);
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn request_context_get_missing_from_app_returns_none() {
+        let app = Arc::new(AppContext::new());
+        let req = RequestContext::new(Arc::clone(&app));
+        assert!(req.get::<String>().is_none());
+    }
+
+    #[test]
+    fn request_context_extension_and_app_singleton_are_independent() {
+        let app = Arc::new(AppContext::new());
+        app.insert(Arc::new(10u32));
+
+        let req = RequestContext::new(Arc::clone(&app));
+        req.insert(20u32); // extension-level u32
+
+        // Extension shadows app-level for get_extension
+        assert_eq!(*req.get_extension::<u32>().unwrap(), 20);
+        // App-level still accessible via get
+        assert_eq!(*req.get::<u32>().unwrap(), 10);
+    }
+
+    #[test]
+    fn request_context_app_ref_matches_original() {
+        let app = Arc::new(AppContext::new());
+        app.insert(Arc::new(99u8));
+        let req = RequestContext::new(Arc::clone(&app));
+        // app() returns reference to the same context
+        assert_eq!(*req.app().get::<u8>().unwrap(), 99);
+    }
+
+    #[test]
+    fn request_context_missing_extension_returns_none() {
+        let app = Arc::new(AppContext::new());
+        let req = RequestContext::new(Arc::clone(&app));
+        assert!(req.get_extension::<String>().is_none());
+    }
+
+    #[test]
+    fn app_context_struct_singleton() {
+        #[derive(Debug, PartialEq)]
+        struct Config { port: u16 }
+
+        let ctx = AppContext::new();
+        ctx.insert(Arc::new(Config { port: 8080 }));
+        let cfg = ctx.get::<Config>().unwrap();
+        assert_eq!(cfg.port, 8080);
+    }
 }

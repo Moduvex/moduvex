@@ -73,4 +73,47 @@ mod tests {
         let path = Path::from_request(&mut req).unwrap();
         assert!(path.is_empty());
     }
+
+    #[test]
+    fn path_extract_multiple_keys() {
+        let mut req = Request::new(Method::GET, "/users/42/posts/7");
+        req.extensions.insert(vec![
+            ("uid".to_string(), "42".to_string()),
+            ("pid".to_string(), "7".to_string()),
+        ]);
+        let path = Path::from_request(&mut req).unwrap();
+        assert_eq!(path.get("uid"), Some("42"));
+        assert_eq!(path.get("pid"), Some("7"));
+        assert_eq!(path.len(), 2);
+    }
+
+    #[test]
+    fn path_get_missing_key_returns_none() {
+        let mut req = Request::new(Method::GET, "/users/1");
+        req.extensions
+            .insert(vec![("id".to_string(), "1".to_string())]);
+        let path = Path::from_request(&mut req).unwrap();
+        assert!(path.get("missing_key").is_none());
+    }
+
+    #[test]
+    fn path_into_inner_returns_params() {
+        let mut req = Request::new(Method::GET, "/item/42");
+        req.extensions
+            .insert(vec![("id".to_string(), "42".to_string())]);
+        let path = Path::from_request(&mut req).unwrap();
+        let inner = path.into_inner();
+        assert_eq!(inner, vec![("id".to_string(), "42".to_string())]);
+    }
+
+    #[test]
+    fn path_params_consumed_from_extensions() {
+        // After extraction, params are removed from extensions
+        let mut req = Request::new(Method::GET, "/x/1");
+        req.extensions
+            .insert(vec![("x".to_string(), "1".to_string())]);
+        let _ = Path::from_request(&mut req).unwrap();
+        // Params are removed (consumed)
+        assert!(req.extensions.get::<Vec<(String, String)>>().is_none());
+    }
 }

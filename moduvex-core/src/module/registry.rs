@@ -335,4 +335,91 @@ mod tests {
         reg.topological_sort().unwrap();
         assert_eq!(reg.len(), 0);
     }
+
+    #[test]
+    fn default_creates_empty_registry() {
+        let reg = ModuleRegistry::default();
+        assert!(reg.is_empty());
+    }
+
+    #[test]
+    fn into_entries_consumes_registry() {
+        let mut reg = ModuleRegistry::new();
+        reg.push(entry("x", 0));
+        let entries = reg.into_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "x");
+    }
+
+    #[test]
+    fn sort_by_priority_single_entry() {
+        let mut reg = ModuleRegistry::new();
+        reg.push(entry("solo", 50));
+        reg.sort_by_priority();
+        assert_eq!(reg.iter().next().unwrap().name, "solo");
+    }
+
+    #[test]
+    fn topological_sort_diamond_dependency() {
+        // root → a, root → b, a → leaf, b → leaf
+        // leaf depends on a and b; a,b depend on root
+        let mut reg = ModuleRegistry::new();
+        reg.push(entry_with_deps("leaf", 0, vec!["a", "b"]));
+        reg.push(entry_with_deps("a", 0, vec!["root"]));
+        reg.push(entry_with_deps("b", 0, vec!["root"]));
+        reg.push(entry("root", 0));
+        reg.topological_sort().unwrap();
+
+        let names: Vec<_> = reg.iter().map(|e| e.name).collect();
+        let root_pos = names.iter().position(|&n| n == "root").unwrap();
+        let a_pos = names.iter().position(|&n| n == "a").unwrap();
+        let b_pos = names.iter().position(|&n| n == "b").unwrap();
+        let leaf_pos = names.iter().position(|&n| n == "leaf").unwrap();
+
+        assert!(root_pos < a_pos, "root before a");
+        assert!(root_pos < b_pos, "root before b");
+        assert!(a_pos < leaf_pos, "a before leaf");
+        assert!(b_pos < leaf_pos, "b before leaf");
+    }
+
+    #[test]
+    fn topological_sort_single_module_no_deps() {
+        let mut reg = ModuleRegistry::new();
+        reg.push(entry("alone", 0));
+        reg.topological_sort().unwrap();
+        assert_eq!(reg.len(), 1);
+        assert_eq!(reg.iter().next().unwrap().name, "alone");
+    }
+
+    #[test]
+    fn topological_sort_three_way_cycle_detected() {
+        let mut reg = ModuleRegistry::new();
+        // a → b → c → a
+        reg.push(entry_with_deps("a", 0, vec!["b"]));
+        reg.push(entry_with_deps("b", 0, vec!["c"]));
+        reg.push(entry_with_deps("c", 0, vec!["a"]));
+        let result = reg.topological_sort();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("circular"), "error should mention circular: {msg}");
+    }
+
+    #[test]
+    fn iter_returns_entries_in_insertion_order() {
+        let mut reg = ModuleRegistry::new();
+        reg.push(entry("first", 0));
+        reg.push(entry("second", 0));
+        reg.push(entry("third", 0));
+        let names: Vec<_> = reg.iter().map(|e| e.name).collect();
+        assert_eq!(names, ["first", "second", "third"]);
+    }
+
+    #[test]
+    fn unknown_dep_names_ignored_in_topo_sort() {
+        // If a dep name is not in registry, it's ignored (unknown)
+        let mut reg = ModuleRegistry::new();
+        reg.push(entry_with_deps("a", 0, vec!["nonexistent"]));
+        // Should not error — unknown deps are silently ignored
+        assert!(reg.topological_sort().is_ok());
+    }
 }

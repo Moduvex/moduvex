@@ -223,4 +223,133 @@ mod tests {
         let root = Router::new().nest("/api/v1", api);
         assert!(root.lookup(Method::GET, "/api/v1/users").is_some());
     }
+
+    #[test]
+    fn wildcard_route_captures_remainder() {
+        let router = Router::new().get("/files/*path", ok_handler);
+        let m = router.lookup(Method::GET, "/files/a/b/c").unwrap();
+        assert_eq!(
+            m.params,
+            vec![("path".to_string(), "a/b/c".to_string())]
+        );
+    }
+
+    #[test]
+    fn multiple_params_in_route() {
+        let router = Router::new().get("/users/:uid/posts/:pid", ok_handler);
+        let m = router.lookup(Method::GET, "/users/42/posts/7").unwrap();
+        assert!(m.params.contains(&("uid".to_string(), "42".to_string())));
+        assert!(m.params.contains(&("pid".to_string(), "7".to_string())));
+    }
+
+    #[test]
+    fn fallback_handler_is_accessible() {
+        let router = Router::new()
+            .get("/hello", ok_handler)
+            .fallback(ok_handler);
+        // Fallback is set
+        assert!(router.fallback_handler().is_some());
+    }
+
+    #[test]
+    fn no_fallback_returns_none() {
+        let router = Router::new().get("/only", ok_handler);
+        assert!(router.fallback_handler().is_none());
+    }
+
+    #[test]
+    fn put_method_registered_and_matched() {
+        let router = Router::new().put("/resource/:id", ok_handler);
+        let m = router.lookup(Method::PUT, "/resource/5").unwrap();
+        assert_eq!(m.params[0], ("id".to_string(), "5".to_string()));
+    }
+
+    #[test]
+    fn delete_method_registered_and_matched() {
+        let router = Router::new().delete("/items/:id", ok_handler);
+        assert!(router.lookup(Method::DELETE, "/items/3").is_some());
+    }
+
+    #[test]
+    fn patch_method_registered_and_matched() {
+        let router = Router::new().patch("/things/:id", ok_handler);
+        assert!(router.lookup(Method::PATCH, "/things/9").is_some());
+    }
+
+    #[test]
+    fn options_method_registered_and_matched() {
+        let router = Router::new().options("/resource", ok_handler);
+        assert!(router.lookup(Method::OPTIONS, "/resource").is_some());
+    }
+
+    #[test]
+    fn nested_router_with_params() {
+        let inner = Router::new().get("/users/:id", ok_handler);
+        let root = Router::new().nest("/api", inner);
+        let m = root.lookup(Method::GET, "/api/users/42").unwrap();
+        assert_eq!(m.params[0], ("id".to_string(), "42".to_string()));
+    }
+
+    #[test]
+    fn nested_deep_prefix() {
+        let inner = Router::new().get("/items", ok_handler);
+        let root = Router::new().nest("/api/v2", inner);
+        assert!(root.lookup(Method::GET, "/api/v2/items").is_some());
+        assert!(root.lookup(Method::GET, "/api/items").is_none());
+    }
+
+    #[test]
+    fn head_without_get_route_returns_none() {
+        let router = Router::new().post("/data", ok_handler);
+        // HEAD falls back to GET only; no GET registered → no match
+        assert!(router.lookup(Method::HEAD, "/data").is_none());
+    }
+
+    #[test]
+    fn post_and_get_same_path_different_methods() {
+        let router = Router::new()
+            .get("/resource", ok_handler)
+            .post("/resource", ok_handler);
+        assert!(router.lookup(Method::GET, "/resource").is_some());
+        assert!(router.lookup(Method::POST, "/resource").is_some());
+        assert!(router.lookup(Method::DELETE, "/resource").is_none());
+    }
+
+    #[test]
+    fn root_path_route() {
+        let router = Router::new().get("/", ok_handler);
+        assert!(router.lookup(Method::GET, "/").is_some());
+        assert!(router.lookup(Method::GET, "/extra").is_none());
+    }
+
+    #[test]
+    fn router_default_is_empty() {
+        let router = Router::default();
+        assert!(router.lookup(Method::GET, "/").is_none());
+        assert!(router.fallback_handler().is_none());
+    }
+
+    #[test]
+    fn route_all_methods_registered() {
+        let router = Router::new()
+            .get("/r", ok_handler)
+            .post("/r", ok_handler)
+            .put("/r", ok_handler)
+            .delete("/r", ok_handler)
+            .patch("/r", ok_handler)
+            .options("/r", ok_handler);
+        for method in [
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::PATCH,
+            Method::OPTIONS,
+        ] {
+            assert!(
+                router.lookup(method, "/r").is_some(),
+                "method {method:?} should match"
+            );
+        }
+    }
 }

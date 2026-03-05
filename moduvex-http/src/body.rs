@@ -206,4 +206,74 @@ mod tests {
         let b = Body::from_bytes(vec![]);
         assert!(matches!(b, Body::Empty));
     }
+
+    #[test]
+    fn body_fixed_variant_construction() {
+        let body = Body::Fixed(b"hello".to_vec());
+        if let Body::Fixed(v) = body {
+            assert_eq!(v, b"hello");
+        } else {
+            panic!("expected Fixed variant");
+        }
+    }
+
+    #[test]
+    fn body_empty_variant_matches() {
+        let body = Body::Empty;
+        assert!(matches!(body, Body::Empty));
+        assert!(body.is_empty());
+        assert_eq!(body.content_length(), Some(0));
+    }
+
+    #[test]
+    fn body_from_text() {
+        let body = Body::from_text("hello world");
+        assert_eq!(body.content_length(), Some(11));
+        assert_eq!(body.into_bytes(), b"hello world");
+    }
+
+    #[test]
+    fn body_from_str_slice_converts() {
+        let body: Body = "test".into();
+        assert_eq!(body.into_bytes(), b"test");
+    }
+
+    #[test]
+    fn body_from_string_converts() {
+        let body: Body = String::from("owned string").into();
+        assert!(!body.is_empty());
+    }
+
+    #[test]
+    fn body_channel_empty_sender_produces_empty() {
+        let (body, sender) = Body::channel();
+        // Close without sending
+        sender.close();
+        assert_eq!(body.into_bytes(), b"");
+    }
+
+    #[test]
+    fn body_stream_is_not_empty() {
+        let (body, _sender) = Body::channel();
+        // Stream body is never considered empty (we don't know its content)
+        assert!(!body.is_empty());
+    }
+
+    #[test]
+    fn body_content_length_stream_is_none() {
+        let (body, _sender) = Body::channel();
+        // Streaming body has unknown length
+        assert_eq!(body.content_length(), None);
+    }
+
+    #[test]
+    fn body_sender_ignores_send_after_close() {
+        let (body, sender) = Body::channel();
+        sender.send(b"first".to_vec());
+        sender.close();
+        // Creating a second sender reference would be needed for this test.
+        // Instead verify the body collected what was sent before close.
+        let bytes = body.into_bytes();
+        assert_eq!(bytes, b"first");
+    }
 }

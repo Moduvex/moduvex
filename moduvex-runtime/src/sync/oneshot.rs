@@ -255,4 +255,204 @@ mod tests {
             assert_eq!(rx.await.unwrap(), vec![1, 2, 3]);
         });
     }
+
+    // ── Additional oneshot tests ───────────────────────────────────────────
+
+    #[test]
+    fn oneshot_send_string() {
+        let result = block_on(async {
+            let (tx, rx) = channel::<String>();
+            tx.send("world".to_string()).unwrap();
+            rx.await
+        });
+        assert_eq!(result.unwrap(), "world");
+    }
+
+    #[test]
+    fn oneshot_send_struct() {
+        #[derive(Debug, PartialEq)]
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+        let result = block_on(async {
+            let (tx, rx) = channel::<Point>();
+            tx.send(Point { x: 1, y: 2 }).unwrap();
+            rx.await
+        });
+        assert_eq!(result.unwrap(), Point { x: 1, y: 2 });
+    }
+
+    #[test]
+    fn oneshot_send_vec() {
+        let result = block_on(async {
+            let (tx, rx) = channel::<Vec<u8>>();
+            tx.send(vec![1, 2, 3, 4, 5]).unwrap();
+            rx.await
+        });
+        assert_eq!(result.unwrap(), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn oneshot_multiple_pairs_concurrent() {
+        block_on_with_spawn(async {
+            let mut rxs = Vec::new();
+            for i in 0u32..10 {
+                let (tx, rx) = channel::<u32>();
+                spawn(async move {
+                    tx.send(i).unwrap();
+                });
+                rxs.push(rx);
+            }
+            let mut results: Vec<u32> = Vec::new();
+            for rx in rxs {
+                results.push(rx.await.unwrap());
+            }
+            results.sort();
+            assert_eq!(results, (0..10).collect::<Vec<_>>());
+        });
+    }
+
+    #[test]
+    fn oneshot_recv_error_display() {
+        let err = RecvError::Closed;
+        let s = format!("{err}");
+        assert!(s.contains("closed") || s.contains("Closed"));
+    }
+
+    #[test]
+    fn oneshot_send_returns_err_when_rx_dropped() {
+        let (tx, rx) = channel::<i32>();
+        drop(rx);
+        let result = tx.send(42);
+        assert_eq!(result, Err(42));
+    }
+
+    #[test]
+    fn oneshot_send_value_then_recv_in_separate_block_on() {
+        // Verify that a value sent synchronously (before polling) is received correctly.
+        let (tx, rx) = channel::<u64>();
+        tx.send(12345).unwrap();
+        let val = block_on(async { rx.await.unwrap() });
+        assert_eq!(val, 12345);
+    }
+
+    #[test]
+    fn oneshot_sender_drop_closes_from_spawn() {
+        let result = block_on_with_spawn(async {
+            let (tx, rx) = channel::<u32>();
+            // Sender dropped inside a spawned task without sending
+            let jh = spawn(async move {
+                drop(tx);
+            });
+            jh.await.unwrap();
+            rx.await
+        });
+        assert_eq!(result, Err(RecvError::Closed));
+    }
+
+    #[test]
+    fn oneshot_recv_error_is_error_trait() {
+        let err = RecvError::Closed;
+        // RecvError implements std::error::Error
+        let _e: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn oneshot_u8_roundtrip() {
+        let result = block_on(async {
+            let (tx, rx) = channel::<u8>();
+            tx.send(255).unwrap();
+            rx.await.unwrap()
+        });
+        assert_eq!(result, 255);
+    }
+
+    #[test]
+    fn oneshot_bool_roundtrip() {
+        let result = block_on(async {
+            let (tx, rx) = channel::<bool>();
+            tx.send(true).unwrap();
+            rx.await.unwrap()
+        });
+        assert!(result);
+    }
+
+    #[test]
+    fn oneshot_unit_roundtrip() {
+        let result = block_on(async {
+            let (tx, rx) = channel::<()>();
+            tx.send(()).unwrap();
+            rx.await.unwrap()
+        });
+        assert_eq!(result, ());
+    }
+
+    #[test]
+    fn oneshot_10_pairs_in_parallel() {
+        block_on_with_spawn(async {
+            let mut rxs = Vec::new();
+            for i in 0..10u32 {
+                let (tx, rx) = channel::<u32>();
+                let val = i * 3;
+                spawn(async move { tx.send(val).unwrap() });
+                rxs.push((i, rx));
+            }
+            for (i, rx) in rxs {
+                let v = rx.await.unwrap();
+                assert_eq!(v, i * 3);
+            }
+        });
+    }
+
+    #[test]
+    fn oneshot_send_before_poll_synchronous() {
+        // Sender sends synchronously before receiver is polled — should be ready immediately
+        let (tx, rx) = channel::<u32>();
+        tx.send(777).unwrap();
+        let v = block_on(async { rx.await.unwrap() });
+        assert_eq!(v, 777);
+    }
+
+    #[test]
+    fn oneshot_send_i64_max() {
+        let result = block_on(async {
+            let (tx, rx) = channel::<i64>();
+            tx.send(i64::MAX).unwrap();
+            rx.await.unwrap()
+        });
+        assert_eq!(result, i64::MAX);
+    }
+
+    #[test]
+    fn oneshot_send_i64_min() {
+        let result = block_on(async {
+            let (tx, rx) = channel::<i64>();
+            tx.send(i64::MIN).unwrap();
+            rx.await.unwrap()
+        });
+        assert_eq!(result, i64::MIN);
+    }
+
+    #[test]
+    fn oneshot_send_empty_vec() {
+        let result = block_on(async {
+            let (tx, rx) = channel::<Vec<u8>>();
+            tx.send(Vec::new()).unwrap();
+            rx.await.unwrap()
+        });
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn oneshot_two_separate_channels_independent() {
+        block_on(async {
+            let (tx1, rx1) = channel::<u32>();
+            let (tx2, rx2) = channel::<u32>();
+            tx1.send(1).unwrap();
+            tx2.send(2).unwrap();
+            assert_eq!(rx1.await.unwrap(), 1);
+            assert_eq!(rx2.await.unwrap(), 2);
+        });
+    }
 }

@@ -217,4 +217,109 @@ mod tests {
         assert_eq!(encode_bool(true), "t");
         assert_eq!(encode_bool(false), "f");
     }
+
+    // ── Additional pg_types tests ──────────────────────────────────────────────
+
+    #[test]
+    fn pg_type_from_unknown_oid_returns_unknown_variant() {
+        let t = PgType::from_oid(99999);
+        assert!(matches!(t, PgType::Unknown(99999)));
+    }
+
+    #[test]
+    fn pg_type_bool_oid_16() {
+        assert!(matches!(PgType::from_oid(16), PgType::Bool));
+    }
+
+    #[test]
+    fn pg_type_text_oid_25() {
+        assert!(matches!(PgType::from_oid(25), PgType::Text));
+    }
+
+    #[test]
+    fn pg_type_int4_oid_23() {
+        assert!(matches!(PgType::from_oid(23), PgType::Int4));
+    }
+
+    #[test]
+    fn pg_type_int8_oid_20() {
+        assert!(matches!(PgType::from_oid(20), PgType::Int8));
+    }
+
+    #[test]
+    fn pg_type_float8_oid_701() {
+        assert!(matches!(PgType::from_oid(701), PgType::Float8));
+    }
+
+    #[test]
+    fn pg_type_timestamp_oid_1114() {
+        assert!(matches!(PgType::from_oid(1114), PgType::Timestamp));
+    }
+
+    #[test]
+    fn pg_type_uuid_oid_2950() {
+        assert!(matches!(PgType::from_oid(2950), PgType::Uuid));
+    }
+
+    #[test]
+    fn pg_type_unknown_oid_roundtrip() {
+        let t = PgType::from_oid(12345);
+        assert_eq!(t.oid(), 12345);
+    }
+
+    #[test]
+    fn pg_type_oid_constants_match_from_oid() {
+        assert_eq!(PgType::from_oid(OID_BOOL), PgType::Bool);
+        assert_eq!(PgType::from_oid(OID_INT4), PgType::Int4);
+        assert_eq!(PgType::from_oid(OID_INT8), PgType::Int8);
+        assert_eq!(PgType::from_oid(OID_FLOAT8), PgType::Float8);
+        assert_eq!(PgType::from_oid(OID_TEXT), PgType::Text);
+        assert_eq!(PgType::from_oid(OID_TIMESTAMP), PgType::Timestamp);
+        assert_eq!(PgType::from_oid(OID_UUID), PgType::Uuid);
+    }
+
+    #[test]
+    fn decode_i32_max_value() {
+        assert_eq!(decode_i32(b"2147483647").unwrap(), i32::MAX);
+    }
+
+    #[test]
+    fn decode_i32_min_value() {
+        assert_eq!(decode_i32(b"-2147483648").unwrap(), i32::MIN);
+    }
+
+    #[test]
+    fn decode_i64_min_value() {
+        assert_eq!(decode_i64(b"-9223372036854775808").unwrap(), i64::MIN);
+    }
+
+    #[test]
+    fn decode_f64_negative() {
+        let v = decode_f64(b"-1.5").unwrap();
+        assert!((v - (-1.5f64)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn decode_bool_off_and_on() {
+        assert!(!decode_bool(b"off").unwrap());
+        assert!(decode_bool(b"on").unwrap());
+    }
+
+    #[test]
+    fn decode_text_empty_string() {
+        assert_eq!(decode_text(b"").unwrap(), "");
+    }
+
+    #[test]
+    fn encode_i64_negative() {
+        let s = encode_i64(-100);
+        assert_eq!(decode_i64(s.as_bytes()).unwrap(), -100);
+    }
+
+    #[test]
+    fn encode_f64_roundtrip() {
+        let s = encode_f64(1.23456789);
+        let v = decode_f64(s.as_bytes()).unwrap();
+        assert!((v - 1.23456789).abs() < 1e-8);
+    }
 }

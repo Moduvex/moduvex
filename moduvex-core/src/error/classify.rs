@@ -154,4 +154,97 @@ mod tests {
         let e = LifecycleError::new("startup failed").in_module("UserModule");
         assert!(e.to_string().contains("UserModule"));
     }
+
+    #[test]
+    fn config_error_without_key_display() {
+        let e = ConfigError::new("some problem");
+        let s = e.to_string();
+        assert!(s.contains("some problem"));
+        assert!(!s.contains("''")); // no empty key brackets
+    }
+
+    #[test]
+    fn config_error_new_has_no_key() {
+        let e = ConfigError::new("message");
+        assert!(e.key.is_none());
+    }
+
+    #[test]
+    fn config_error_with_key_sets_key() {
+        let e = ConfigError::new("bad").with_key("server.port");
+        assert_eq!(e.key.as_deref(), Some("server.port"));
+    }
+
+    #[test]
+    fn config_error_is_error_trait() {
+        let e = ConfigError::new("test");
+        let _: &dyn std::error::Error = &e;
+    }
+
+    #[test]
+    fn lifecycle_error_without_module_display() {
+        let e = LifecycleError::new("phase failed");
+        let s = e.to_string();
+        assert!(s.contains("phase failed"));
+        // No module mentioned
+        assert!(!s.contains("module '"));
+    }
+
+    #[test]
+    fn lifecycle_error_new_has_no_module() {
+        let e = LifecycleError::new("failure");
+        assert!(e.module.is_none());
+    }
+
+    #[test]
+    fn lifecycle_error_in_module_sets_module() {
+        let e = LifecycleError::new("crash").in_module("DbModule");
+        assert_eq!(e.module, Some("DbModule"));
+    }
+
+    #[test]
+    fn lifecycle_error_is_error_trait() {
+        let e = LifecycleError::new("boom");
+        let _: &dyn std::error::Error = &e;
+    }
+
+    #[test]
+    fn domain_error_default_is_public() {
+        let e = NotFound("x".into());
+        assert!(e.is_public());
+    }
+
+    #[test]
+    fn infra_error_default_retry_after_ms() {
+        #[derive(Debug)]
+        struct SimpleInfra;
+        impl fmt::Display for SimpleInfra {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "oops")
+            }
+        }
+        impl std::error::Error for SimpleInfra {}
+        impl InfraError for SimpleInfra {
+            fn is_retryable(&self) -> bool { false }
+            // retry_after_ms defaults to None
+        }
+
+        let e = SimpleInfra;
+        assert!(e.retry_after_ms().is_none());
+        assert!(!e.is_retryable());
+    }
+
+    #[test]
+    fn config_error_debug_format() {
+        let e = ConfigError::new("debug test").with_key("k");
+        let dbg = format!("{:?}", e);
+        assert!(dbg.contains("debug test"));
+    }
+
+    #[test]
+    fn lifecycle_error_debug_format() {
+        let e = LifecycleError::new("lifecycle").in_module("M");
+        let dbg = format!("{:?}", e);
+        assert!(dbg.contains("lifecycle"));
+    }
 }

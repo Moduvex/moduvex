@@ -149,4 +149,66 @@ mod tests {
         assert_eq!(cfg.idle_timeout, Duration::from_secs(300));
         assert!(cfg.validate().is_ok());
     }
+
+    // ── Additional pool config tests ───────────────────────────────────────────
+
+    #[test]
+    fn pool_config_default_max_size_is_reasonable() {
+        let cfg = PoolConfig::default();
+        assert!(cfg.max_size >= 1, "default max_size must be >= 1");
+    }
+
+    #[test]
+    fn pool_config_validation_zero_max_size_fails() {
+        let mut cfg = PoolConfig::default();
+        cfg.max_size = 0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn pool_config_validation_zero_min_idle_ok() {
+        let mut cfg = PoolConfig::default();
+        cfg.min_idle = 0;
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn pool_config_connection_string_set() {
+        let cfg = PoolConfig::new("postgres://localhost/test");
+        assert!(cfg.database_url.contains("postgres"));
+    }
+
+    #[test]
+    fn pool_config_max_lifetime_default_nonzero() {
+        let cfg = PoolConfig::default();
+        assert!(cfg.max_lifetime > Duration::ZERO);
+    }
+
+    #[test]
+    fn pool_config_health_check_interval_default_nonzero() {
+        let cfg = PoolConfig::default();
+        assert!(cfg.health_check_interval > Duration::ZERO);
+    }
+
+    #[test]
+    fn pool_config_max_lifetime_override() {
+        let cfg = PoolConfig::new("postgres://localhost/test")
+            .max_lifetime(Duration::from_secs(900));
+        assert_eq!(cfg.max_lifetime, Duration::from_secs(900));
+    }
+
+    #[test]
+    fn pool_config_health_check_interval_override() {
+        let cfg = PoolConfig::new("postgres://localhost/test")
+            .health_check_interval(Duration::from_secs(15));
+        assert_eq!(cfg.health_check_interval, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn pool_config_min_idle_equals_max_size_is_ok() {
+        let cfg = PoolConfig::new("postgres://localhost/test")
+            .max_size(5)
+            .min_idle(5);
+        assert!(cfg.validate().is_ok());
+    }
 }

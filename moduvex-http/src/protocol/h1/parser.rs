@@ -425,4 +425,276 @@ mod tests {
             ParseStatus::Error(ParseError::UnknownMethod)
         ));
     }
+
+    // ── Method coverage ───────────────────────────────────────────────────
+
+    #[test]
+    fn parse_post_with_content_length() {
+        let buf = b"POST /data HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.method, Method::POST);
+        assert_eq!(head.content_length, Some(5));
+        assert!(!head.has_chunked_te);
+    }
+
+    #[test]
+    fn parse_put_method() {
+        let buf = b"PUT /res/1 HTTP/1.1\r\nHost: x\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.method, Method::PUT);
+    }
+
+    #[test]
+    fn parse_delete_method() {
+        let buf = b"DELETE /res/1 HTTP/1.1\r\nHost: x\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.method, Method::DELETE);
+    }
+
+    #[test]
+    fn parse_patch_method() {
+        let buf = b"PATCH /res/1 HTTP/1.1\r\nHost: x\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.method, Method::PATCH);
+    }
+
+    #[test]
+    fn parse_options_method() {
+        let buf = b"OPTIONS /res HTTP/1.1\r\nHost: x\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.method, Method::OPTIONS);
+    }
+
+    #[test]
+    fn parse_head_method() {
+        let buf = b"HEAD / HTTP/1.1\r\nHost: x\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.method, Method::HEAD);
+    }
+
+    // ── HTTP version ──────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_http10_no_host_required() {
+        let buf = b"GET / HTTP/1.0\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.version, HttpVersion::Http10);
+    }
+
+    #[test]
+    fn parse_unsupported_version_http09_rejected() {
+        let buf = b"GET / HTTP/0.9\r\nHost: x\r\n\r\n";
+        assert!(matches!(
+            parse_request_head(buf, &limits()),
+            ParseStatus::Error(ParseError::UnsupportedVersion)
+        ));
+    }
+
+    #[test]
+    fn parse_unsupported_version_http20_rejected() {
+        let buf = b"GET / HTTP/2.0\r\nHost: x\r\n\r\n";
+        assert!(matches!(
+            parse_request_head(buf, &limits()),
+            ParseStatus::Error(ParseError::UnsupportedVersion)
+        ));
+    }
+
+    // ── Query string ──────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_path_no_query() {
+        let buf = b"GET /users HTTP/1.1\r\nHost: x\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.path, "/users");
+        assert_eq!(head.query, None);
+    }
+
+    #[test]
+    fn parse_empty_query_string() {
+        let buf = b"GET /search? HTTP/1.1\r\nHost: x\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.path, "/search");
+        assert_eq!(head.query, Some(""));
+    }
+
+    #[test]
+    fn parse_query_multiple_params() {
+        let buf = b"GET /s?a=1&b=2&c=3 HTTP/1.1\r\nHost: x\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.query, Some("a=1&b=2&c=3"));
+    }
+
+    // ── Header validation ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_multiple_headers_preserved() {
+        let buf = b"GET / HTTP/1.1\r\nHost: x\r\nX-Foo: bar\r\nX-Bar: baz\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.headers.len(), 3); // Host + X-Foo + X-Bar
+    }
+
+    #[test]
+    fn parse_header_value_leading_trailing_ows_stripped() {
+        let buf = b"GET / HTTP/1.1\r\nHost:  example.com  \r\n\r\n";
+        let head = complete(buf);
+        let host = head
+            .headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("host"))
+            .unwrap();
+        assert_eq!(host.1, b"example.com");
+    }
+
+    #[test]
+    fn parse_null_byte_in_header_value_rejected() {
+        let buf = b"GET / HTTP/1.1\r\nHost: x\r\nX-Bad: foo\x00bar\r\n\r\n";
+        assert!(matches!(
+            parse_request_head(buf, &limits()),
+            ParseStatus::Error(ParseError::HeaderInjection)
+        ));
+    }
+
+    #[test]
+    fn parse_lf_in_header_name_rejected() {
+        // CRLF parsing will break this — result is either BadHeader or error
+        let buf = b"GET / HTTP/1.1\r\nHost: x\r\nX-Bad\nName: val\r\n\r\n";
+        let status = parse_request_head(buf, &limits());
+        assert!(matches!(status, ParseStatus::Error(_)));
+    }
+
+    #[test]
+    fn parse_multiple_cl_same_value_allowed() {
+        // RFC 7230: identical Content-Length values are allowed
+        let buf = b"POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\n";
+        let status = parse_request_head(buf, &limits());
+        assert!(matches!(status, ParseStatus::Complete(_)));
+    }
+
+    #[test]
+    fn parse_multiple_cl_different_values_rejected() {
+        let buf =
+            b"POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nContent-Length: 10\r\n\r\n";
+        assert!(matches!(
+            parse_request_head(buf, &limits()),
+            ParseStatus::Error(ParseError::MultipleContentLength)
+        ));
+    }
+
+    #[test]
+    fn parse_transfer_encoding_non_chunked_ok() {
+        let buf = b"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n\r\n";
+        let head = complete(buf);
+        assert!(!head.has_chunked_te);
+    }
+
+    #[test]
+    fn parse_chunked_te_detected() {
+        let buf = b"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let head = complete(buf);
+        assert!(head.has_chunked_te);
+    }
+
+    // ── Limit enforcement ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_request_line_too_long_rejected() {
+        let long_path = "a".repeat(9000);
+        let buf = format!("GET /{long_path} HTTP/1.1\r\nHost: x\r\n\r\n");
+        assert!(matches!(
+            parse_request_head(buf.as_bytes(), &limits()),
+            ParseStatus::Error(ParseError::RequestLineTooLong)
+        ));
+    }
+
+    #[test]
+    fn parse_too_many_headers_rejected() {
+        let mut buf = b"GET / HTTP/1.1\r\nHost: x\r\n".to_vec();
+        for i in 0..101 {
+            buf.extend_from_slice(format!("X-H{i}: val\r\n").as_bytes());
+        }
+        buf.extend_from_slice(b"\r\n");
+        assert!(matches!(
+            parse_request_head(&buf, &limits()),
+            ParseStatus::Error(ParseError::TooManyHeaders)
+        ));
+    }
+
+    #[test]
+    fn parse_header_value_too_long_rejected() {
+        let long_val = "v".repeat(9000);
+        let buf = format!("GET / HTTP/1.1\r\nHost: x\r\nX-Long: {long_val}\r\n\r\n");
+        assert!(matches!(
+            parse_request_head(buf.as_bytes(), &limits()),
+            ParseStatus::Error(ParseError::HeaderValueTooLong)
+        ));
+    }
+
+    #[test]
+    fn parse_header_block_too_large_rejected() {
+        let mut buf = b"GET / HTTP/1.1\r\nHost: x\r\n".to_vec();
+        // Add headers until block exceeds 64KB without terminator
+        let mut total = buf.len();
+        while total < 65 * 1024 {
+            let h = b"X-Pad: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n";
+            buf.extend_from_slice(h);
+            total += h.len();
+        }
+        // No \r\n\r\n terminator — triggers size check on Partial
+        let status = parse_request_head(&buf, &limits());
+        assert!(matches!(
+            status,
+            ParseStatus::Error(ParseError::HeadersTooLarge)
+        ));
+    }
+
+    #[test]
+    fn parse_bad_request_line_no_space_rejected() {
+        let buf = b"GETHTTP/1.1\r\nHost: x\r\n\r\n";
+        assert!(matches!(
+            parse_request_head(buf, &limits()),
+            ParseStatus::Error(ParseError::BadRequestLine)
+        ));
+    }
+
+    // ── head_len correctness ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_head_len_equals_consumed_bytes() {
+        let buf = b"GET /path HTTP/1.1\r\nHost: example.com\r\nX-Custom: value\r\n\r\nBODY";
+        let head = complete(buf);
+        // head_len points exactly to start of body
+        assert_eq!(&buf[head.head_len..], b"BODY");
+    }
+
+    #[test]
+    fn parse_host_with_port() {
+        let buf = b"GET / HTTP/1.1\r\nHost: example.com:8080\r\n\r\n";
+        let head = complete(buf);
+        let host = head
+            .headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("host"))
+            .unwrap();
+        assert_eq!(host.1, b"example.com:8080");
+    }
+
+    #[test]
+    fn parse_limits_custom_tight_max_request_line() {
+        let tight = ParseLimits {
+            max_request_line: 10,
+            ..ParseLimits::default()
+        };
+        let buf = b"GET /very/long/path HTTP/1.1\r\nHost: x\r\n\r\n";
+        assert!(matches!(
+            parse_request_head(buf, &tight),
+            ParseStatus::Error(ParseError::RequestLineTooLong)
+        ));
+    }
+
+    #[test]
+    fn parse_http10_with_content_length() {
+        let buf = b"POST /data HTTP/1.0\r\nContent-Length: 3\r\n\r\n";
+        let head = complete(buf);
+        assert_eq!(head.content_length, Some(3));
+    }
 }

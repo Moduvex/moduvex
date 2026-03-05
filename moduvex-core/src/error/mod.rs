@@ -142,4 +142,90 @@ mod tests {
         let s = e.to_string();
         assert!(s.contains("AuthModule"), "got: {s}");
     }
+
+    #[test]
+    fn infra_error_display_contains_retryable_flag() {
+        #[derive(Debug)]
+        struct NetErr;
+        impl fmt::Display for NetErr {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "network fail")
+            }
+        }
+        impl std::error::Error for NetErr {}
+        impl crate::error::classify::InfraError for NetErr {
+            fn is_retryable(&self) -> bool { true }
+        }
+
+        let e = ModuvexError::Infra(Box::new(NetErr));
+        let s = e.to_string();
+        assert!(s.contains("network fail"), "got: {s}");
+        assert!(s.contains("retryable=true"), "got: {s}");
+    }
+
+    #[test]
+    fn other_error_variant_display() {
+        #[derive(Debug)]
+        struct Plain;
+        impl fmt::Display for Plain {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "plain error")
+            }
+        }
+        impl std::error::Error for Plain {}
+
+        let e = ModuvexError::Other(Box::new(Plain));
+        let s = e.to_string();
+        assert!(s.contains("plain error"), "got: {s}");
+    }
+
+    #[test]
+    fn moduvex_error_source_chain_present() {
+        let e = ModuvexError::Config(ConfigError::new("inner error").with_key("k"));
+        let err: &dyn std::error::Error = &e;
+        // source() is Some(ConfigError)
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn io_error_not_retryable_for_permission_denied() {
+        let io = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let e = ModuvexError::from(io);
+        if let ModuvexError::Infra(ref infra) = e {
+            assert!(!infra.is_retryable());
+        } else {
+            panic!("expected Infra variant");
+        }
+    }
+
+    #[test]
+    fn io_error_retryable_for_connection_reset() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
+        let e = ModuvexError::from(io);
+        if let ModuvexError::Infra(ref infra) = e {
+            assert!(infra.is_retryable());
+        } else {
+            panic!("expected Infra variant");
+        }
+    }
+
+    #[test]
+    fn io_error_retryable_for_would_block() {
+        let io = std::io::Error::new(std::io::ErrorKind::WouldBlock, "block");
+        let e = ModuvexError::from(io);
+        if let ModuvexError::Infra(ref infra) = e {
+            assert!(infra.is_retryable());
+        } else {
+            panic!("expected Infra variant");
+        }
+    }
+
+    #[test]
+    fn config_variant_source_is_config_error() {
+        let e = ModuvexError::Config(ConfigError::new("cfg").with_key("x"));
+        use std::error::Error;
+        let src = e.source().unwrap();
+        // The source should display the config error
+        assert!(src.to_string().contains("cfg"));
+    }
 }

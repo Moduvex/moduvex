@@ -163,4 +163,83 @@ mod tests {
         assert_eq!(Phase::Start.next_startup_phase(), Some(Phase::Ready));
         assert_eq!(Phase::Ready.next_startup_phase(), None);
     }
+
+    #[test]
+    fn stopped_has_no_next_startup_phase() {
+        assert_eq!(Phase::Stopped.next_startup_phase(), None);
+    }
+
+    #[test]
+    fn stopping_next_startup_phase_is_stopped() {
+        assert_eq!(Phase::Stopping.next_startup_phase(), Some(Phase::Stopped));
+    }
+
+    #[test]
+    fn phase_display_all_variants() {
+        assert_eq!(Phase::Config.to_string(), "Config");
+        assert_eq!(Phase::Validate.to_string(), "Validate");
+        assert_eq!(Phase::Init.to_string(), "Init");
+        assert_eq!(Phase::Start.to_string(), "Start");
+        assert_eq!(Phase::Ready.to_string(), "Ready");
+        assert_eq!(Phase::Stopping.to_string(), "Stopping");
+        assert_eq!(Phase::Stopped.to_string(), "Stopped");
+    }
+
+    #[test]
+    fn phase_clone_and_copy() {
+        let p = Phase::Ready;
+        let p2 = p; // Copy
+        let p3 = p.clone(); // Clone
+        assert_eq!(p2, Phase::Ready);
+        assert_eq!(p3, Phase::Ready);
+    }
+
+    #[test]
+    fn phase_eq() {
+        assert_eq!(Phase::Init, Phase::Init);
+        assert_ne!(Phase::Init, Phase::Start);
+    }
+
+    #[test]
+    fn valid_full_shutdown_chain() {
+        assert!(Phase::Stopping.can_transition_to(Phase::Stopped));
+        // Stopped has no valid outgoing transitions
+        assert!(!Phase::Stopped.can_transition_to(Phase::Config));
+        assert!(!Phase::Stopped.can_transition_to(Phase::Stopping));
+    }
+
+    #[test]
+    fn transition_fn_validates_full_chain() {
+        let phases = [
+            (Phase::Config, Phase::Validate),
+            (Phase::Validate, Phase::Init),
+            (Phase::Init, Phase::Start),
+            (Phase::Start, Phase::Ready),
+            (Phase::Ready, Phase::Stopping),
+            (Phase::Stopping, Phase::Stopped),
+        ];
+        for (from, to) in phases {
+            assert!(Phase::transition(from, to).is_ok(), "{from:?} -> {to:?} should be ok");
+        }
+    }
+
+    #[test]
+    fn invalid_transition_stopped_to_config() {
+        assert!(!Phase::Stopped.can_transition_to(Phase::Config));
+    }
+
+    #[test]
+    fn invalid_transition_ready_to_start() {
+        assert!(!Phase::Ready.can_transition_to(Phase::Start));
+    }
+
+    #[test]
+    fn emergency_stop_from_config_valid() {
+        assert!(Phase::Config.can_transition_to(Phase::Stopping));
+    }
+
+    #[test]
+    fn emergency_stop_from_validate_valid() {
+        assert!(Phase::Validate.can_transition_to(Phase::Stopping));
+    }
 }

@@ -79,4 +79,97 @@ mod tests {
     fn display_matches_as_str() {
         assert_eq!(format!("{}", Profile::Staging), "staging");
     }
+
+    #[test]
+    fn parse_production_alias() {
+        assert_eq!(Profile::parse("production"), Profile::Prod);
+    }
+
+    #[test]
+    fn parse_stage_alias() {
+        assert_eq!(Profile::parse("stage"), Profile::Staging);
+    }
+
+    #[test]
+    fn parse_uppercase_dev() {
+        assert_eq!(Profile::parse("DEV"), Profile::Dev);
+    }
+
+    #[test]
+    fn parse_uppercase_staging() {
+        assert_eq!(Profile::parse("STAGING"), Profile::Staging);
+    }
+
+    #[test]
+    fn parse_mixed_case_development() {
+        assert_eq!(Profile::parse("Development"), Profile::Dev);
+    }
+
+    #[test]
+    fn custom_profile_preserves_lowercase() {
+        // Custom names are lowercased via to_lowercase in parse()
+        let p = Profile::parse("CUSTOM-ENV");
+        assert_eq!(p, Profile::Custom("custom-env".into()));
+    }
+
+    #[test]
+    fn custom_profile_as_str() {
+        let p = Profile::Custom("nightly".into());
+        assert_eq!(p.as_str(), "nightly");
+    }
+
+    #[test]
+    fn staging_as_str() {
+        assert_eq!(Profile::Staging.as_str(), "staging");
+    }
+
+    #[test]
+    fn profile_equality_custom() {
+        assert_eq!(Profile::Custom("qa".into()), Profile::Custom("qa".into()));
+        assert_ne!(Profile::Custom("qa".into()), Profile::Custom("uat".into()));
+    }
+
+    #[test]
+    fn profile_clone_equality() {
+        let p = Profile::Prod;
+        assert_eq!(p.clone(), Profile::Prod);
+    }
+
+    #[test]
+    fn display_dev() {
+        assert_eq!(format!("{}", Profile::Dev), "dev");
+    }
+
+    #[test]
+    fn display_prod() {
+        assert_eq!(format!("{}", Profile::Prod), "prod");
+    }
+
+    #[test]
+    fn display_custom() {
+        let p = Profile::Custom("canary".into());
+        assert_eq!(format!("{}", p), "canary");
+    }
+
+    #[test]
+    fn from_env_dev_when_unset() {
+        std::env::remove_var("MODUVEX_PROFILE");
+        assert_eq!(Profile::from_env(), Profile::Dev);
+    }
+
+    #[test]
+    fn from_env_prod() {
+        std::env::set_var("MODUVEX_PROFILE", "prod");
+        let p = Profile::from_env();
+        std::env::remove_var("MODUVEX_PROFILE");
+        assert_eq!(p, Profile::Prod);
+    }
+
+    #[test]
+    fn from_env_custom() {
+        std::env::set_var("MODUVEX_PROFILE", "beta");
+        let p = Profile::from_env();
+        std::env::remove_var("MODUVEX_PROFILE");
+        assert_eq!(p, Profile::Custom("beta".into()));
+    }
 }
