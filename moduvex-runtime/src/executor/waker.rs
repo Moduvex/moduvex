@@ -14,13 +14,12 @@
 //! was created via `Arc::into_raw`. All four functions restore it to an `Arc`
 //! before performing any operation, maintaining the reference count correctly.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{RawWaker, RawWakerVTable, Waker};
 
 use super::scheduler::GlobalQueue;
 use super::task::{TaskHeader, STATE_IDLE, STATE_SCHEDULED};
-
-use std::sync::atomic::Ordering;
 
 // ── Vtable ────────────────────────────────────────────────────────────────────
 
@@ -33,18 +32,77 @@ static TASK_WAKER_VTABLE: RawWakerVTable =
 /// Construct a `Waker` from an `Arc<TaskHeader>` and a reference to the
 /// global queue into which the waker will push the task when fired.
 ///
-/// Ownership of the `Arc` is transferred into the waker (the Arc's refcount
-/// is incremented by the caller before passing, or the caller gives up their
-/// `Arc` — here we use `Arc::clone` to keep the caller's handle alive).
-pub(crate) fn make_waker(header: Arc<TaskHeader>, queue: Arc<GlobalQueue>) -> Waker {
-    // Combine header + queue into a single heap allocation so the data pointer
-    // carries both pieces of information needed by `wake`.
-    let data = Arc::new(WakerData { header, queue });
+/// `notifier` is optional: in multi-threaded mode it writes to a worker's
+/// self-pipe to unpark it after re-scheduling a task.
+pub(crate) fn make_waker(
+    header: Arc<TaskHeader>,
+    queue: Arc<GlobalQueue>,
+) -> Waker {
+    make_waker_with_notifier(header, queue, None)
+}
+
+/// Like `make_waker` but with an explicit `WorkerNotifier` for multi-threaded mode.
+pub(crate) fn make_waker_with_notifier(
+    header: Arc<TaskHeader>,
+    queue: Arc<GlobalQueue>,
+    notifier: Option<Arc<WorkerNotifier>>,
+) -> Waker {
+    let data = Arc::new(WakerData {
+        header,
+        queue,
+        notifier,
+    });
     let ptr = Arc::into_raw(data) as *const ();
     let raw = RawWaker::new(ptr, &TASK_WAKER_VTABLE);
     // SAFETY: The vtable functions correctly implement the RawWaker contract
     // (see module doc). `ptr` is a valid Arc pointer.
     unsafe { Waker::from_raw(raw) }
+}
+
+// ── WorkerNotifier ────────────────────────────────────────────────────────────
+
+/// Holds write-end fds of all worker self-pipes. Used to unpark a worker
+/// after pushing a task to GlobalQueue.
+pub(crate) struct WorkerNotifier {
+    wake_fds: std::sync::Mutex<Vec<i32>>,
+    next: AtomicUsize,
+}
+
+// SAFETY: Mutex<Vec<i32>> and AtomicUsize are Send+Sync.
+unsafe impl Send for WorkerNotifier {}
+unsafe impl Sync for WorkerNotifier {}
+
+impl WorkerNotifier {
+    pub(crate) fn new() -> Self {
+        Self {
+            wake_fds: std::sync::Mutex::new(Vec::new()),
+            next: AtomicUsize::new(0),
+        }
+    }
+
+    /// Register a worker's self-pipe write fd.
+    pub(crate) fn add_fd(&self, fd: i32) {
+        self.wake_fds.lock().unwrap().push(fd);
+    }
+
+    /// Write one byte to a worker's self-pipe (round-robin) to unpark it.
+    #[cfg(unix)]
+    pub(crate) fn notify_one(&self) {
+        let fds = self.wake_fds.lock().unwrap();
+        if fds.is_empty() {
+            return;
+        }
+        let idx = self.next.fetch_add(1, Ordering::Relaxed) % fds.len();
+        let fd = fds[idx];
+        drop(fds);
+        unsafe {
+            let b: u8 = 1;
+            libc::write(fd, &b as *const u8 as *const _, 1);
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn notify_one(&self) {}
 }
 
 // ── WakerData ─────────────────────────────────────────────────────────────────
@@ -54,6 +112,7 @@ pub(crate) fn make_waker(header: Arc<TaskHeader>, queue: Arc<GlobalQueue>) -> Wa
 struct WakerData {
     header: Arc<TaskHeader>,
     queue: Arc<GlobalQueue>,
+    notifier: Option<Arc<WorkerNotifier>>,
 }
 
 // SAFETY: WakerData contains only Send+Sync types.
@@ -121,6 +180,10 @@ fn schedule_task(data: &WakerData) {
     );
     if prev.is_ok() {
         data.queue.push_header(Arc::clone(header));
+        // Notify a parked worker to check the global queue.
+        if let Some(ref notifier) = data.notifier {
+            notifier.notify_one();
+        }
     }
 }
 

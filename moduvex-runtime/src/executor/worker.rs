@@ -27,7 +27,7 @@ use crate::signal::{on_signal_readable, SIGNAL_TOKEN};
 
 use super::scheduler::{GlobalQueue, LocalQueue};
 use super::task::{Task, TaskHeader, STATE_CANCELLED, STATE_COMPLETED};
-use super::waker::make_waker;
+use super::waker::{make_waker_with_notifier, WorkerNotifier};
 use super::work_stealing::{StealableQueue, WorkStealingPool};
 
 /// Sentinel reactor token for the self-pipe read end.
@@ -55,6 +55,8 @@ pub(crate) struct WorkerThread {
     pub tasks: Arc<Mutex<HashMap<usize, Task>>>,
     /// Shared shutdown signal.
     pub shutdown: Arc<AtomicBool>,
+    /// Notifier for unparking workers when tasks are enqueued.
+    notifier: Arc<WorkerNotifier>,
     /// Read end of the self-pipe (registered with reactor).
     wake_rx: i32,
     /// Write end of the self-pipe (written by wakers to unpark).
@@ -69,6 +71,7 @@ impl WorkerThread {
         steal_pool: Arc<WorkStealingPool>,
         tasks: Arc<Mutex<HashMap<usize, Task>>>,
         shutdown: Arc<AtomicBool>,
+        notifier: Arc<WorkerNotifier>,
     ) -> std::io::Result<Self> {
         let (wake_rx, wake_tx) = create_pipe()?;
         with_reactor(|r| r.register(wake_rx, WAKE_TOKEN, Interest::READABLE))?;
@@ -81,6 +84,7 @@ impl WorkerThread {
             steal_pool,
             tasks,
             shutdown,
+            notifier,
             wake_rx,
             wake_tx,
         })
@@ -181,32 +185,20 @@ impl WorkerThread {
             return;
         }
 
-        // Build a waker that re-enqueues on wake.
-        let waker = make_waker(Arc::clone(&header), Arc::clone(&self.global));
+        // Build a waker that re-enqueues on wake and notifies a worker.
+        let waker = make_waker_with_notifier(
+            Arc::clone(&header),
+            Arc::clone(&self.global),
+            Some(Arc::clone(&self.notifier)),
+        );
         let mut cx = Context::from_waker(&waker);
 
-        let task_ref = {
-            // We borrow the task from the shared map to poll it.
-            // SAFETY: only one worker polls a task at a time (STATE_RUNNING).
-            let guard = self.tasks.lock().unwrap();
-            // If not present, another worker already ran and removed it.
-            guard.get(&key).is_some()
-        };
-
-        if task_ref {
-            // We need to poll with the task still in the map (for cancellation).
-            // Extract, poll, and re-insert or remove.
-            let task = {
-                let mut guard = self.tasks.lock().unwrap();
-                guard.remove(&key)
-            };
-            if let Some(task) = task {
-                let completed = task.poll_task(&mut cx);
-                if !completed {
-                    // Re-insert for future polling.
-                    self.tasks.lock().unwrap().insert(key, task);
-                }
-                // If completed, task drops here freeing body.
+        // Extract task atomically (single lock) to avoid TOCTOU race.
+        let task = self.tasks.lock().unwrap().remove(&key);
+        if let Some(task) = task {
+            let completed = task.poll_task(&mut cx);
+            if !completed {
+                self.tasks.lock().unwrap().insert(key, task);
             }
         }
     }
