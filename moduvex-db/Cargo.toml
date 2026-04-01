@@ -12,7 +12,7 @@ moduvex-runtime = { version = "1.0.0", path = "../moduvex-runtime" }
 moduvex-core    = { version = "1.0.0", path = "../moduvex-core" }
 md-5             = "0.10"
 sha2             = "0.10"
-hmac             = "0.12"
+hmac             = "0.13"
 base64ct         = { version = "1", features = ["alloc"] }
 
 [dev-dependencies]
